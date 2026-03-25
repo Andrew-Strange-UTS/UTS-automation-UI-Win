@@ -1,0 +1,13 @@
+node_modules/
+dist/
+renderer/dist/
+renderer/node_modules/
+server/node_modules/
+resources/portable-git/
+*.exe
+*.msi
+.env.local
+user-secrets/
+schedules/
+tmp/
+data/

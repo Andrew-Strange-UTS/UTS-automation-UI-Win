@@ -1,0 +1,50 @@
+{
+  "name": "uts-win-automation-ui",
+  "version": "1.0.0",
+  "description": "UTS Windows Desktop Automation UI",
+  "main": "main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "concurrently \"cd renderer && npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "build:renderer": "cd renderer && npm run build",
+    "build:server": "cd server && npm install --production",
+    "predist": "npm run build:renderer && npm run build:server",
+    "dist": "electron-builder --win",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "electron": "^33.3.1",
+    "electron-builder": "^25.1.8",
+    "wait-on": "^8.0.3"
+  },
+  "build": {
+    "appId": "com.uts.win-automation",
+    "productName": "UTS Automation",
+    "win": {
+      "target": "nsis",
+      "icon": "resources/icons/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "files": [
+      "main/**/*",
+      "renderer/dist/**/*",
+      "server/**/*",
+      "!server/node_modules/.cache"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/portable-git",
+        "to": "portable-git",
+        "filter": ["**/*"]
+      }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "server/node_modules/chromedriver/**"
+    ]
+  }
+}

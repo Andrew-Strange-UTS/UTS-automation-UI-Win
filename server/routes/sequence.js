@@ -7,6 +7,7 @@ const { spawn } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
 const router = express.Router();
 const { TESTS_ROOT } = require("../utils/paths");
+const { getChromeBinary } = require("../utils/chromeFinder");
 const BUILTINS_DIR = path.join(__dirname, "../builtins");
 
 // --- Import secrets handling utilities ---
@@ -78,6 +79,11 @@ router.post("/run", async (req, res) => {
     const desktopRunnerPath = path.join(__dirname, "../runners/desktop-runner.js");
 
     // Driver setup code depends on test type
+    const chromeBinary = getChromeBinary();
+    const chromeBinaryLine = chromeBinary
+      ? `  options.setChromeBinaryPath(${JSON.stringify(chromeBinary)});`
+      : `  // Using default Chrome location`;
+
     const driverSetupCode = isDesktop ? `
   const { createDesktopDriver } = require(${JSON.stringify(desktopRunnerPath)});
   let driver;
@@ -87,18 +93,20 @@ router.post("/run", async (req, res) => {
     driver = createDesktopDriver();
     console.log("Desktop driver ready (PowerShell + Windows APIs)");
 ` : `
-  const seleniumUrl = process.env.SELENIUM_REMOTE_URL || "";
+  const remoteUrl = process.env.SELENIUM_REMOTE_URL;
   const options = new chrome.Options();
+${chromeBinaryLine}
+  options.addArguments("--no-sandbox","--disable-dev-shm-usage");
   if (process.env.VISUAL_BROWSER !== "true") {
-    options.addArguments("--headless=new","--disable-gpu","--no-sandbox","--window-size=1920,1080");
+    options.addArguments("--headless=new","--disable-gpu","--window-size=1920,1080");
   }
   let driver;
   let failedCount = 0;
   let passedCount = 0;
   try {
-    ${`driver = seleniumUrl
-      ? await new Builder().forBrowser("chrome").setChromeOptions(options).usingServer(seleniumUrl).build()
-      : await new Builder().forBrowser("chrome").setChromeOptions(options).build();`}
+    driver = remoteUrl
+      ? await new Builder().forBrowser("chrome").setChromeOptions(options).usingServer(remoteUrl).build()
+      : await new Builder().forBrowser("chrome").setChromeOptions(options).build();
 `;
 
     const driverTeardownCode = isDesktop
@@ -172,9 +180,9 @@ ${driverSetupCode}
         });
       };
       try {
-        console.log("Running step #" + (i + 1) + " [" + testName + "]");
+        console.log("▶ Running step #" + (i + 1) + " [" + testName + "]");
         await fn(driver, testParams, zephyrLog);
-        console.log("Finished step #" + (i + 1) + " [" + testName + "]");
+        console.log("✅ Finished step #" + (i + 1) + " [" + testName + "]");
         const hasFailedZephyrStep = zephyrStepResults.some(function(r) { return r.statusName === "Fail"; });
         if (hasFailedZephyrStep) {
           failedCount++;
@@ -184,7 +192,7 @@ ${driverSetupCode}
         await sendZephyrResult(zephyrConfig, hasFailedZephyrStep ? "Fail" : "Pass", zephyrStepResults);
       } catch (stepError) {
         failedCount++;
-        console.error("Step #" + (i + 1) + " [" + testName + "] failed:", stepError && stepError.stack || stepError);
+        console.error("❌ Step #" + (i + 1) + " [" + testName + "] failed:", stepError && stepError.stack || stepError);
         zephyrLog("ERROR: " + (stepError && stepError.message || stepError), "Fail");
         await sendZephyrResult(zephyrConfig, "Fail", zephyrStepResults);
       }
@@ -222,11 +230,10 @@ main();
     };
     if (!isDesktop) {
       childEnv.SELENIUM_REMOTE_URL = process.env.SELENIUM_REMOTE_URL || "";
-      childEnv.VISUAL_BROWSER = String(
-        parametersWithSecrets.visualBrowser !== undefined
-          ? parametersWithSecrets.visualBrowser
-          : "true"
-      );
+      // Check if any step in the sequence has visualBrowser enabled
+      const anyVisual = sequence.some((s) => s.visualBrowser) ||
+        Object.values(parameters).some((p) => p && p.visualBrowser);
+      childEnv.VISUAL_BROWSER = anyVisual ? "true" : "false";
     }
     const child = spawn("node", ["run.js"], {
       cwd: seqDir,

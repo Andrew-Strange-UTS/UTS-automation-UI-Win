@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { BACKEND_URL } from "@/config";
+import theme from "@/theme";
 
 export default function SecretRow({ name, refreshList }) {
   const [editMode, setEditMode] = useState(false);
@@ -52,14 +53,14 @@ export default function SecretRow({ name, refreshList }) {
               onChange={e => setNewValue(e.target.value)}
               style={{ padding: "6px", borderRadius: 4, border: "1px solid #ccc", fontSize: "13px" }}
             />
-            <button type="submit" style={{ padding: "4px 10px", fontSize: "13px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: 4 }}>Set</button>
+            <button type="submit" style={{ padding: "4px 10px", fontSize: "13px", background: theme.primary, color: "#fff", border: "none", borderRadius: 4 }}>Set</button>
             <button type="button" onClick={() => { setEditMode(false); setNewValue(""); }} style={{ padding: "4px 8px", fontSize: "13px", background: "#aaa", color: "#fff", border: "none", borderRadius: 4 }}>Cancel</button>
           </form>
         ) : (
           <>
             <button
               onClick={() => setEditMode(true)}
-              style={{ padding: "4px 10px", marginRight: 5, fontSize: "13px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}
+              style={{ padding: "4px 10px", marginRight: 5, fontSize: "13px", background: theme.primary, color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}
             >Edit</button>
             <button
               onClick={handleDelete}

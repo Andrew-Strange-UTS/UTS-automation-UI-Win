@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { BACKEND_URL } from "@/config";
+import theme from "@/theme";
 
 export default function RunSequence({
   sequence,
@@ -141,9 +142,9 @@ export default function RunSequence({
         fontSize: "12px",
         fontWeight: "bold",
         marginBottom: "10px",
-        backgroundColor: testType === "desktop" ? "#f3e8ff" : "#f0fdf4",
-        color: testType === "desktop" ? "#7c3aed" : "#16a34a",
-        border: `1px solid ${testType === "desktop" ? "#c4b5fd" : "#86efac"}`,
+        backgroundColor: testType === "desktop" ? theme.primaryLight : "#f0fdf4",
+        color: testType === "desktop" ? theme.primary : "#16a34a",
+        border: `1px solid ${testType === "desktop" ? theme.primaryBorder : "#86efac"}`,
       }}>
         {testType === "desktop" ? "Desktop (Windows)" : "Web (Selenium)"}
       </div>
@@ -155,7 +156,7 @@ export default function RunSequence({
               <span style={{ marginLeft: "6px" }} title="Zephyr Scale enabled">🚩</span>
             )}
             {test.visualBrowser && (
-              <span style={{ color: "#7c3aed", marginLeft: "6px" }}>👁</span>
+              <span style={{ color: theme.primary, marginLeft: "6px" }}>👁</span>
             )}
           </li>
         ))}
@@ -167,7 +168,7 @@ export default function RunSequence({
           style={{
             marginTop: "20px",
             padding: "10px 15px",
-            background: isRunning ? "#aaa" : "#7c3aed",
+            background: isRunning ? "#aaa" : theme.primary,
             color: "white",
             border: "none",
             borderRadius: "5px",

@@ -7,8 +7,11 @@ import SecretsPanel from "@/components/SecretsPanel";
 import PrivateRepoCheckbox from "@/components/PrivateRepoCheckbox";
 import PATPopup from "@/components/PATPopup";
 import SchedulePanel from "@/components/SchedulePanel";
+import StartupChecks from "@/components/StartupChecks";
 import { BACKEND_URL, WS_URL } from "@/config";
+import theme from "@/theme";
 export default function App() {
+  const [showStartupChecks, setShowStartupChecks] = useState(true);
   // Refs for log state
   const sequenceBufferRef = useRef("");
   const logsAccumulatorRef = useRef({});
@@ -16,7 +19,7 @@ export default function App() {
   const [repoUrl, setRepoUrl] = useState(() =>
     typeof window !== "undefined" ? localStorage.getItem("repoUrl") || "" : ""
   );
-  
+
   useEffect(() => {
     if (typeof window !== "undefined") {
       localStorage.setItem("repoUrl", repoUrl);
@@ -39,8 +42,11 @@ export default function App() {
     if (typeof window !== "undefined") {
       localStorage.setItem("testType", testType);
     }
+    // Clear sequence when switching test types
+    setRunSequence([]);
+    setTestOptions({});
   }, [testType]);
-  
+
   const [privateRepo, setPrivateRepo] = useState(() =>
     typeof window !== "undefined" ? localStorage.getItem("privateRepo") === "true" : false
   );
@@ -352,49 +358,18 @@ export default function App() {
     '};',
   ].join('\n');
 
+  if (showStartupChecks) {
+    return (
+      <div style={{ minHeight: "100vh", backgroundColor: "#f5f5f5", paddingTop: "20px" }}>
+        <StartupChecks onDismiss={() => setShowStartupChecks(false)} />
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: "flex" }}>
       <div style={{ flex: 1, minWidth: 0, padding: "20px", overflow: "hidden" }}>
-        <h1 style={{ textAlign: "center" }}>UTS Windows Automation</h1>
-        {/* Test Type Toggle */}
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: "16px" }}>
-          <div style={{
-            display: "inline-flex",
-            borderRadius: "8px",
-            overflow: "hidden",
-            border: "2px solid #7c3aed",
-          }}>
-            <button
-              onClick={() => setTestType("desktop")}
-              style={{
-                padding: "10px 24px",
-                fontSize: "15px",
-                fontWeight: "bold",
-                border: "none",
-                cursor: "pointer",
-                backgroundColor: testType === "desktop" ? "#7c3aed" : "#fff",
-                color: testType === "desktop" ? "#fff" : "#7c3aed",
-              }}
-            >
-              Desktop Tests
-            </button>
-            <button
-              onClick={() => setTestType("web")}
-              style={{
-                padding: "10px 24px",
-                fontSize: "15px",
-                fontWeight: "bold",
-                border: "none",
-                borderLeft: "2px solid #7c3aed",
-                cursor: "pointer",
-                backgroundColor: testType === "web" ? "#7c3aed" : "#fff",
-                color: testType === "web" ? "#fff" : "#7c3aed",
-              }}
-            >
-              Web Tests
-            </button>
-          </div>
-        </div>
+        <h1 style={{ textAlign: "center" }}>UTS Automation UI</h1>
         <div
           style={{
             display: "flex",
@@ -424,8 +399,8 @@ export default function App() {
             style={{
               padding: "12px 20px",
               fontSize: "16px",
-              backgroundColor: "#7c3aed",
-              color: "white",
+              backgroundColor: theme.primary,
+              color: theme.primaryText,
               border: "none",
               borderRadius: "5px",
               cursor: "pointer",
@@ -438,8 +413,8 @@ export default function App() {
             style={{
               padding: "12px 20px",
               fontSize: "16px",
-              backgroundColor: "#7c3aed",
-              color: "white",
+              backgroundColor: theme.primary,
+              color: theme.primaryText,
               border: "none",
               borderRadius: "5px",
               cursor: "pointer",
@@ -465,14 +440,14 @@ export default function App() {
             boxShadow: "0 2px 6px rgba(0,0,0,0.06)",
           }}
         >
-          
+
           <button
             onClick={() => setIsServerLogExpanded((prev) => !prev)}
             style={{
               padding: "10px 20px",
               fontWeight: "bold",
-              backgroundColor: "#7c3aed",
-              color: "#fff",
+              backgroundColor: theme.primary,
+              color: theme.primaryText,
               border: "none",
               borderRadius: "5px",
               cursor: "pointer",
@@ -553,6 +528,45 @@ export default function App() {
           })()}
           stepNames={runSequence.map((t) => t.name)}
         />
+        {/* Test Type Toggle */}
+        <div style={{ display: "flex", justifyContent: "center", margin: "24px 0 16px" }}>
+          <div style={{
+            display: "inline-flex",
+            borderRadius: "8px",
+            overflow: "hidden",
+            border: `2px solid ${theme.primary}`,
+          }}>
+            <button
+              onClick={() => setTestType("desktop")}
+              style={{
+                padding: "10px 24px",
+                fontSize: "15px",
+                fontWeight: "bold",
+                border: "none",
+                cursor: "pointer",
+                backgroundColor: testType === "desktop" ? theme.primary : "#fff",
+                color: testType === "desktop" ? theme.primaryText : theme.primary,
+              }}
+            >
+              Desktop Tests
+            </button>
+            <button
+              onClick={() => setTestType("web")}
+              style={{
+                padding: "10px 24px",
+                fontSize: "15px",
+                fontWeight: "bold",
+                border: "none",
+                borderLeft: `2px solid ${theme.primary}`,
+                cursor: "pointer",
+                backgroundColor: testType === "web" ? theme.primary : "#fff",
+                color: testType === "web" ? theme.primaryText : theme.primary,
+              }}
+            >
+              Web Tests
+            </button>
+          </div>
+        </div>
         {/* Test cards */}
         {loading ? (
           <p style={{ textAlign: "center", fontStyle: "italic" }}>Loading tests...</p>
@@ -562,8 +576,8 @@ export default function App() {
               style={{
                 width: "100%", maxWidth: "1400px",
                 margin: "40px auto 0",
-                backgroundColor: "#7c3aed",
-                color: "white",
+                backgroundColor: theme.primary,
+                color: theme.primaryText,
                 borderRadius: "10px",
                 padding: "20px 40px",
                 textAlign: "center",
@@ -586,6 +600,7 @@ export default function App() {
                 }
                 onOptionsChange={handleOptionsChange}
                 results={testResults["__default-desktop-test"]}
+                testType={testType}
               />
             ) : (
               <TestCard
@@ -600,6 +615,7 @@ export default function App() {
                 }
                 onOptionsChange={handleOptionsChange}
                 results={testResults["__default-test"]}
+                testType={testType}
               />
             )}
           </>
@@ -615,6 +631,7 @@ export default function App() {
               onToggleInSequence={handleToggleSequence}
               onOptionsChange={handleOptionsChange}
               results={testResults[name]}
+              testType={testType}
             />
           ))
         )}

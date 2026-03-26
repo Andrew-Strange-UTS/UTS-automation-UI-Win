@@ -11,3 +11,4 @@ user-secrets/
 schedules/
 tmp/
 data/
+.claude/

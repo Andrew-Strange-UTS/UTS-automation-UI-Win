@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import SecretRow from "./SecretRow";
 import { BACKEND_URL } from "@/config";
+import theme from "@/theme";
 
 export default function SecretsPanel() {
   const [secrets, setSecrets] = useState([]);
@@ -67,7 +68,7 @@ export default function SecretsPanel() {
         />
         <button type="submit"
           style={{
-            padding: "10px 18px", background: "#7c3aed", color: "#fff",
+            padding: "10px 18px", background: theme.primary, color: theme.primaryText,
             border: "none", borderRadius: 4, fontWeight: "bold", cursor: "pointer"
           }}
         >Add Secret</button>

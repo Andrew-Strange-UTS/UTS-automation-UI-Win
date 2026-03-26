@@ -1,5 +1,6 @@
 
 import React from "react";
+import theme from "@/theme";
 
 export default function PATPopup({ open, onClose }) {
   if (!open) return null;
@@ -94,8 +95,8 @@ export default function PATPopup({ open, onClose }) {
           <button
             onClick={onClose}
             style={{
-              background: "#7c3aed",
-              color: "#fff",
+              background: theme.primary,
+              color: theme.primaryText,
               border: "none",
               borderRadius: 6,
               padding: "10px 26px",

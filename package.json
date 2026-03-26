@@ -5,7 +5,7 @@
   "main": "main/main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "concurrently \"cd renderer && npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev": "concurrently \"cd renderer && npm run dev\" \"wait-on http://localhost:5173 && electron . --no-sandbox\"",
     "build:renderer": "cd renderer && npm run build",
     "build:server": "cd server && npm install --production",
     "predist": "npm run build:renderer && npm run build:server",
@@ -20,7 +20,7 @@
   },
   "build": {
     "appId": "com.uts.win-automation",
-    "productName": "UTS Automation",
+    "productName": "UTS Automation UI",
     "win": {
       "target": "nsis",
       "icon": "resources/icons/icon.ico"

@@ -1,5 +1,6 @@
 
 import { useEffect, useState } from "react";
+import theme from "@/theme";
 
 export default function TestCard({
   name,
@@ -10,6 +11,7 @@ export default function TestCard({
   onToggleInSequence,
   onOptionsChange = () => {},
   results = {},
+  testType = "web",
 }) {
   const [openViewer, setOpenViewer] = useState(null);
   const [status, setStatus] = useState("Never run");
@@ -119,36 +121,42 @@ export default function TestCard({
             type="checkbox"
             checked={isInSequence}
             onChange={handleAddToSequence}
+            style={{ accentColor: theme.primary }}
           /> Add to Run Sequence
         </label>
-        <label>
-        <input
-          type="checkbox"
-          checked={visualBrowser}
-          onChange={(e) => {
-            const checked = e.target.checked;
-            setVisualBrowser(checked);
-          }}
-        /> Enable visual browser
-        </label>
-        <label style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          OKTA Environment:
-          <select
-            value={oktaEnv}
-            onChange={(e) => setOktaEnv(e.target.value)}
-            style={{
-              padding: "6px 10px",
-              fontSize: "14px",
-              borderRadius: "4px",
-              border: "1px solid #ccc",
-            }}
-          >
-            <option value="none">None</option>
-            <option value="prod">Prod</option>
-            <option value="preprod">Pre-prod</option>
-            <option value="test">Test</option>
-          </select>
-        </label>
+        {testType === "web" && (
+          <>
+            <label>
+            <input
+              type="checkbox"
+              checked={visualBrowser}
+              style={{ accentColor: theme.primary }}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setVisualBrowser(checked);
+              }}
+            /> Enable visual browser
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              OKTA Environment:
+              <select
+                value={oktaEnv}
+                onChange={(e) => setOktaEnv(e.target.value)}
+                style={{
+                  padding: "6px 10px",
+                  fontSize: "14px",
+                  borderRadius: "4px",
+                  border: "1px solid #ccc",
+                }}
+              >
+                <option value="none">None</option>
+                <option value="prod">Prod</option>
+                <option value="preprod">Pre-prod</option>
+                <option value="test">Test</option>
+              </select>
+            </label>
+          </>
+        )}
       </div>
       {/* Parameter entry */}
       {parameterArr.length > 0 && (
@@ -186,11 +194,11 @@ export default function TestCard({
       <div style={{
         marginTop: "20px",
         padding: "14px 18px",
-        background: "#f8f5ff",
+        background: theme.primaryLight,
         borderRadius: "8px",
-        border: "1px solid #e0d4f5",
+        border: `1px solid ${theme.primaryBorder}`,
       }}>
-        <h4 style={{ marginBottom: "10px", color: "#7c3aed" }}>Zephyr Scale</h4>
+        <h4 style={{ marginBottom: "10px", color: theme.primary }}>Zephyr Scale</h4>
         <div style={{ display: "flex", gap: "12px" }}>
           <div style={{ flex: 1 }}>
             <label style={{ display: "block", fontWeight: "bold", fontSize: "13px", marginBottom: "4px" }}>Project Key</label>
@@ -231,7 +239,7 @@ export default function TestCard({
             onClick={toggleRun}
             style={{
               padding: "10px 15px",
-              background: "#7c3aed",
+              background: theme.primary,
               color: "white",
               border: "none",
               borderRadius: "5px",
@@ -249,7 +257,7 @@ export default function TestCard({
             onClick={toggleMeta}
             style={{
               padding: "10px 15px",
-              background: "#7c3aed",
+              background: theme.primary,
               color: "white",
               border: "none",
               borderRadius: "5px",

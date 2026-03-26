@@ -93,10 +93,42 @@ function compileAndRun(schedule, onLog, onDone) {
   }
 
   const zephyrToken = allSecrets["ZEPHYR_API_TOKEN"] || "";
+  const testType = schedule.sequencePayload.testType || "web";
+  const isDesktop = testType === "desktop";
+  const desktopRunnerPath = path.join(__dirname, "./runners/desktop-runner.js");
+
+  // Driver setup depends on test type
+  const driverSetupCode = isDesktop ? `
+  const { createDesktopDriver } = require(${JSON.stringify(desktopRunnerPath)});
+  let driver;
+  let failedCount = 0;
+  let passedCount = 0;
+  try {
+    driver = createDesktopDriver();
+    console.log("Desktop driver ready (PowerShell + Windows APIs)");
+` : `
+  const remoteUrl = process.env.SELENIUM_REMOTE_URL;
+  const options = new chrome.Options();
+  options.addArguments("--headless=new","--disable-gpu","--no-sandbox","--window-size=1920,1080");
+  let driver;
+  let failedCount = 0;
+  let passedCount = 0;
+  try {
+    driver = remoteUrl
+      ? await new Builder().forBrowser("chrome").setChromeOptions(options).usingServer(remoteUrl).build()
+      : await new Builder().forBrowser("chrome").setChromeOptions(options).build();
+`;
+
+  const driverTeardownCode = isDesktop
+    ? `    if (driver && driver.quit) await driver.quit();`
+    : `    await driver.quit();`;
+  const driverErrorTeardown = isDesktop
+    ? `    // Desktop driver has no persistent session`
+    : `    if (driver) await driver.quit();`;
 
   const combinedRunJsContent = `
-const { Builder, By, Key, until } = require('selenium-webdriver');
-const chrome = require('selenium-webdriver/chrome');
+${isDesktop ? "" : `const { Builder, By, Key, until } = require('selenium-webdriver');
+const chrome = require('selenium-webdriver/chrome');`}
 const { postTestExecution } = require(${JSON.stringify(path.join(__dirname, "./utils/zephyr.js"))});
 const stepFns = [
 ${sequence.map((test) => {
@@ -138,14 +170,7 @@ process.on('unhandledRejection', function (err) {
   process.exit(2);
 });
 async function main() {
-  const seleniumUrl = process.env.SELENIUM_REMOTE_URL || "http://localhost:4444/wd/hub";
-  const options = new chrome.Options();
-  options.addArguments("--headless=new","--disable-gpu","--no-sandbox","--window-size=1920,1080");
-  let driver;
-  let failedCount = 0;
-  let passedCount = 0;
-  try {
-    driver = await new Builder().forBrowser("chrome").setChromeOptions(options).usingServer(seleniumUrl).build();
+${driverSetupCode}
     const parameters = ${JSON.stringify(parametersWithSecrets)};
     for (let i = 0; i < stepFns.length; ++i) {
       const fn = stepFns[i];
@@ -174,11 +199,11 @@ async function main() {
         await sendZephyrResult(zephyrConfig, "Fail", zephyrStepResults);
       }
     }
-    await driver.quit();
+${driverTeardownCode}
     console.log("All steps finished. " + passedCount + " passed / " + failedCount + " failed.");
     process.exit(failedCount > 0 ? 1 : 0);
   } catch (err) {
-    if (driver) await driver.quit();
+${driverErrorTeardown}
     console.error("Fatal error in scheduled sequence:", err && err.stack || err);
     process.exit(1);
   }
@@ -188,14 +213,18 @@ main();
 
   fs.writeFileSync(path.join(seqDir, "run.js"), combinedRunJsContent);
 
+  const childEnv = {
+    ...process.env,
+    NODE_PATH: process.env.NODE_PATH,
+    VISUAL_BROWSER: "false",
+  };
+  if (!isDesktop && process.env.SELENIUM_REMOTE_URL) {
+    childEnv.SELENIUM_REMOTE_URL = process.env.SELENIUM_REMOTE_URL;
+  }
+
   const child = spawn("node", ["run.js"], {
     cwd: seqDir,
-    env: {
-      ...process.env,
-      NODE_PATH: process.env.NODE_PATH,
-      SELENIUM_REMOTE_URL: process.env.SELENIUM_REMOTE_URL || "http://selenium:4444/wd/hub",
-      VISUAL_BROWSER: "false",
-    },
+    env: childEnv,
   });
 
   child.stdout.on("data", (chunk) => {

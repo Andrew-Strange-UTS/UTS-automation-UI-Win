@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { BACKEND_URL } from "@/config";
+import theme from "@/theme";
 
 const DAYS = [
   { key: "mon", label: "Mon" },
@@ -67,7 +68,7 @@ function Countdown({ time, days, status }) {
   const ms = nextRun.getTime() - now;
 
   return (
-    <span style={{ marginLeft: "16px", color: "#7c3aed", fontWeight: "bold" }}>
+    <span style={{ marginLeft: "16px", color: theme.primary, fontWeight: "bold" }}>
       Next run in {formatCountdown(ms)}
     </span>
   );
@@ -99,6 +100,7 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
   const [editNtfyTopic, setEditNtfyTopic] = useState("");
   const [editTeamsWebhookAll, setEditTeamsWebhookAll] = useState("");
   const [editTeamsWebhookFail, setEditTeamsWebhookFail] = useState("");
+  const [serviceDown, setServiceDown] = useState(false);
 
   const fetchSchedules = useCallback(async () => {
     try {
@@ -106,9 +108,14 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
       if (res.ok) {
         const data = await res.json();
         setSchedules(data.schedules || []);
+        setServiceDown(false);
+      } else if (res.status === 503) {
+        setServiceDown(true);
+        setSchedules([]);
       }
     } catch (e) {
       console.error("Failed to fetch schedules:", e);
+      setServiceDown(true);
     }
   }, []);
 
@@ -343,6 +350,26 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
         boxShadow: "0 2px 6px rgba(0,0,0,0.06)",
       }}
     >
+      {serviceDown && (
+        <div style={{
+          backgroundColor: "#fef2f2",
+          border: "1px solid #fca5a5",
+          borderRadius: "8px",
+          padding: "12px 16px",
+          marginBottom: "16px",
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+        }}>
+          <span style={{ fontSize: "18px" }}>&#9888;</span>
+          <div>
+            <strong style={{ color: "#dc2626" }}>Scheduler service is not running</strong>
+            <div style={{ fontSize: "13px", color: "#666", marginTop: "2px" }}>
+              Schedules will not execute until the service is started. Run <code style={{ background: "#eee", padding: "2px 5px", borderRadius: "3px" }}>node server/scheduler-service.js</code> or install it as a system service.
+            </div>
+          </div>
+        </div>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
         <h2 style={{ margin: 0 }}>Scheduled Sequences</h2>
         <button
@@ -350,7 +377,7 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
           style={{
             padding: "8px 16px",
             fontSize: "14px",
-            backgroundColor: "#7c3aed",
+            backgroundColor: theme.primary,
             color: "white",
             border: "none",
             borderRadius: "5px",
@@ -365,7 +392,7 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
           style={{
             padding: "8px 16px",
             fontSize: "14px",
-            backgroundColor: "#7c3aed",
+            backgroundColor: theme.primary,
             color: "white",
             border: "none",
             borderRadius: "5px",
@@ -439,11 +466,11 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
       {showCreate && (
         <div
           style={{
-            backgroundColor: "#f0ecf9",
+            backgroundColor: theme.primaryLight,
             borderRadius: "8px",
             padding: "16px",
             marginBottom: "16px",
-            border: "1px solid #d4c8f0",
+            border: `1px solid ${theme.primaryBorder}`,
           }}
         >
           <h4 style={{ margin: "0 0 12px 0" }}>Schedule Current Sequence</h4>
@@ -498,7 +525,7 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
                   cursor: "pointer",
                   padding: "4px 8px",
                   borderRadius: "4px",
-                  backgroundColor: selectedDays.includes(d.key) ? "#7c3aed" : "#e5e7eb",
+                  backgroundColor: selectedDays.includes(d.key) ? theme.primary : "#e5e7eb",
                   color: selectedDays.includes(d.key) ? "white" : "#333",
                   fontWeight: selectedDays.includes(d.key) ? "bold" : "normal",
                   transition: "all 0.15s",
@@ -534,7 +561,7 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
             ))}
           </div>
 
-          <div style={{ marginBottom: "12px", padding: "12px", backgroundColor: "#e8e0f3", borderRadius: "6px", border: "1px solid #d4c8f0" }}>
+          <div style={{ marginBottom: "12px", padding: "12px", backgroundColor: theme.primaryMedium, borderRadius: "6px", border: `1px solid ${theme.primaryBorder}` }}>
             <strong style={{ fontSize: "13px" }}>Notifications</strong>
             <div style={{ display: "flex", gap: "12px", alignItems: "center", marginTop: "8px", flexWrap: "wrap" }}>
               <label style={{ fontSize: "13px" }}>
@@ -662,7 +689,7 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
                       Stop
                     </button>
                   )}
-                  <button onClick={() => startEdit(s)} style={btnStyle("#7c3aed")}>
+                  <button onClick={() => startEdit(s)} style={btnStyle(theme.primary)}>
                     Edit
                   </button>
                   <button onClick={() => { setExportingId(exportingId === s.id ? null : s.id); setExportPassword(""); }} style={btnStyle("#0891b2")}>
@@ -735,7 +762,7 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
               )}
 
               {s.zephyrSteps && s.zephyrSteps.length > 0 && (
-                <div style={{ marginTop: "6px", fontSize: "12px", color: "#6b21a8" }}>
+                <div style={{ marginTop: "6px", fontSize: "12px", color: theme.primaryDark }}>
                   Zephyr results will be exported to:{" "}
                   {s.zephyrSteps.map((z, i) => (
                     <span key={i}>
@@ -762,10 +789,10 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
                 <div
                   style={{
                     marginTop: "10px",
-                    backgroundColor: "#f0ecf9",
+                    backgroundColor: theme.primaryLight,
                     borderRadius: "8px",
                     padding: "14px",
-                    border: "1px solid #d4c8f0",
+                    border: `1px solid ${theme.primaryBorder}`,
                   }}
                 >
                   <div style={{ display: "flex", gap: "12px", alignItems: "center", marginBottom: "10px", flexWrap: "wrap" }}>
@@ -811,7 +838,7 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
                           cursor: "pointer",
                           padding: "4px 8px",
                           borderRadius: "4px",
-                          backgroundColor: editDays.includes(d.key) ? "#7c3aed" : "#e5e7eb",
+                          backgroundColor: editDays.includes(d.key) ? theme.primary : "#e5e7eb",
                           color: editDays.includes(d.key) ? "white" : "#333",
                           fontWeight: editDays.includes(d.key) ? "bold" : "normal",
                           transition: "all 0.15s",
@@ -845,7 +872,7 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
                       </button>
                     ))}
                   </div>
-                  <div style={{ marginBottom: "10px", padding: "10px", backgroundColor: "#e8e0f3", borderRadius: "6px", border: "1px solid #d4c8f0" }}>
+                  <div style={{ marginBottom: "10px", padding: "10px", backgroundColor: theme.primaryMedium, borderRadius: "6px", border: `1px solid ${theme.primaryBorder}` }}>
                     <strong style={{ fontSize: "12px" }}>Notifications</strong>
                     <div style={{ display: "flex", gap: "10px", alignItems: "center", marginTop: "6px", flexWrap: "wrap" }}>
                       <label style={{ fontSize: "12px" }}>

@@ -32,6 +32,7 @@ const testsRoutes = require("./routes/tests");
 const sequenceRoutes = require("./routes/sequence");
 const secretsRoutes = require("./routes/secrets");
 const schedulesRoutes = require("./routes/schedules");
+const healthRoutes = require("./routes/health");
 
 app.use("/api/git", gitRoutes);
 app.use("/api/stream", streamRoutes);
@@ -39,10 +40,10 @@ app.use("/api/tests", testsRoutes);
 app.use("/api/sequence", sequenceRoutes);
 app.use("/api/secrets", secretsRoutes);
 app.use("/api/schedules", schedulesRoutes);
+app.use("/api/health", healthRoutes);
 
-// Restore scheduled jobs on startup
-const { restoreSchedules } = require("./scheduler");
-restoreSchedules();
+// Schedules are now managed by the standalone scheduler service
+// (server/scheduler-service.js) — the routes proxy to it.
 
 // Create HTTP server
 const server = http.createServer(app);

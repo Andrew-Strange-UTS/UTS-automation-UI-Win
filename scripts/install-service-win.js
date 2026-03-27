@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // scripts/install-service-win.js
-// Installs the UTS Scheduler as a Windows Service using node-windows.
+// Installs the Marvin Scheduler as a Windows Service using node-windows.
 // Run: node scripts/install-service-win.js
 
 const path = require("path");
@@ -14,8 +14,8 @@ try {
 }
 
 const svc = new Service({
-  name: "UTS Automation Scheduler",
-  description: "Runs scheduled test sequences for UTS Automation UI. Shared across all users.",
+  name: "Marvin Scheduler",
+  description: "Runs scheduled test sequences for Marvin. Shared across all users.",
   script: path.resolve(__dirname, "../server/scheduler-service.js"),
   env: [
     { name: "UTS_SCHEDULER_PORT", value: "5050" },
@@ -29,7 +29,7 @@ svc.on("install", () => {
 });
 
 svc.on("start", () => {
-  console.log("UTS Automation Scheduler service is running.");
+  console.log("Marvin Scheduler service is running.");
   console.log("Data directory: C:\\ProgramData\\uts-automation");
   console.log("API: http://localhost:5050/api/health");
 });
@@ -42,5 +42,5 @@ svc.on("error", (err) => {
   console.error("Error:", err);
 });
 
-console.log("Installing UTS Automation Scheduler as a Windows Service...");
+console.log("Installing Marvin Scheduler as a Windows Service...");
 svc.install();

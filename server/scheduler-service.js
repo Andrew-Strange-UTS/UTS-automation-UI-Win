@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // server/scheduler-service.js
-// Standalone scheduler service — runs as a system-wide background process.
+// Marvin scheduler service — runs as a system-wide background process.
 // All users share the same schedules, secrets, and logs.
 // Exposes a REST API on port 5050 (configurable via UTS_SCHEDULER_PORT).
 

@@ -1,8 +1,8 @@
-# Creating Tests for UTS Automation UI
+# Creating Tests for Marvin
 
 ## How Tests Work
 
-UTS Automation UI loads tests from a GitHub repository. The app clones your repo and looks for a `tests/` folder at the root. Each subfolder inside `tests/` becomes a test card in the UI.
+Marvin loads tests from a GitHub repository. The app clones your repo and looks for a `tests/` folder at the root. Each subfolder inside `tests/` becomes a test card in the UI.
 
 ```
 your-repo/
@@ -180,7 +180,7 @@ module.exports = async function (driver, parameters = {}, zephyrLog) {
     zephyrLog("Launched Notepad successfully.", "Pass");
 
     log("Typing test text...");
-    await driver.type("Hello from UTS Automation!");
+    await driver.type("Hello from Marvin!");
     await driver.pause(1000);
     zephyrLog("Typed text into Notepad.", "Pass");
 
@@ -383,7 +383,7 @@ Copy the prompt below and give it to any AI assistant when you need help writing
 ### Prompt
 
 ```
-I'm writing a test for UTS Automation UI — an Electron desktop app that runs automated
+I'm writing a test for Marvin — an Electron desktop app that runs automated
 tests via a Node.js backend. It runs on both Windows and Ubuntu/Linux.
 Tests are stored in a GitHub repo under a tests/ folder.
 Each test is a subfolder containing a run.js and optionally a metadata.json.

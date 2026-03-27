@@ -1,5 +1,5 @@
 // server/scheduler-service-paths.js
-// Path constants for the standalone scheduler service.
+// Path constants for the Marvin scheduler service.
 // Uses a system-wide shared directory so all users see the same data.
 
 const path = require("path");

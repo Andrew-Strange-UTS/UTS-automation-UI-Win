@@ -1,4 +1,4 @@
-# UTS Automation UI
+# Marvin
 
 A self-contained desktop application for automating both **desktop applications** and **web browsers**. Built with Electron, it provides a native UI for running tests, scheduling sequences, and reporting results — no Docker required.
 
@@ -141,7 +141,7 @@ Follow the Windows install steps above, then install the scheduler as a Windows 
 node scripts/install-service-win.js
 ```
 
-This registers **UTS Automation Scheduler** as a Windows Service that:
+This registers **Marvin Scheduler** as a Windows Service that:
 - Starts automatically on boot
 - Runs under the SYSTEM account (not tied to any RDP session)
 - Is shared by all users — everyone sees the same schedules

@@ -14,17 +14,17 @@ try {
 }
 
 const svc = new Service({
-  name: "UTS Automation Scheduler",
+  name: "Marvin Scheduler",
   script: path.resolve(__dirname, "../server/scheduler-service.js"),
 });
 
 svc.on("uninstall", () => {
-  console.log("UTS Automation Scheduler service has been removed.");
+  console.log("Marvin Scheduler service has been removed.");
 });
 
 svc.on("error", (err) => {
   console.error("Error:", err);
 });
 
-console.log("Uninstalling UTS Automation Scheduler service...");
+console.log("Uninstalling Marvin Scheduler service...");
 svc.uninstall();

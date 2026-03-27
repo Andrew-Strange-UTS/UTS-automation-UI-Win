@@ -133,7 +133,15 @@ export default function StartupChecks({ onDismiss }) {
       backgroundColor: "#fff", borderRadius: "12px", border: "1px solid #ccc",
       boxShadow: "0 4px 20px rgba(0,0,0,0.1)",
     }}>
-      <h2 style={{ textAlign: "center", marginBottom: "6px" }}>UTS Automation UI</h2>
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "12px", marginBottom: "6px" }}>
+        <h2 style={{ margin: 0 }}>Marvin</h2>
+        <img
+          src="/img/marvin.png"
+          alt="Marvin"
+          style={{ height: "40px", width: "auto", objectFit: "contain" }}
+          onError={(e) => { e.target.style.display = "none"; }}
+        />
+      </div>
       <p style={{ textAlign: "center", color: "#666", marginTop: 0, marginBottom: "24px", fontSize: "14px" }}>
         Startup diagnostics
       </p>

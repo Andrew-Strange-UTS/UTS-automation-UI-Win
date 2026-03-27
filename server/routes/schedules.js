@@ -60,7 +60,7 @@ async function proxy(req, res) {
     return res.status(upstream.status).json(data);
   } catch (err) {
     return res.status(503).json({
-      error: "Scheduler service is not running. Start the UTS Scheduler Service to manage schedules.",
+      error: "Scheduler service is not running. Start the Marvin Scheduler Service to manage schedules.",
       detail: err.message,
     });
   }
@@ -91,7 +91,7 @@ async function enrichAndProxy(req, res) {
     return res.status(upstream.status).json(data);
   } catch (err) {
     return res.status(503).json({
-      error: "Scheduler service is not running. Start the UTS Scheduler Service to manage schedules.",
+      error: "Scheduler service is not running. Start the Marvin Scheduler Service to manage schedules.",
       detail: err.message,
     });
   }

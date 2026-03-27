@@ -5,7 +5,7 @@ const express = require("express");
 const { execFile, exec } = require("child_process");
 const os = require("os");
 const path = require("path");
-const { getChromeBinary } = require("../utils/chromeFinder");
+const { getChromeBinary, getChromeVersion } = require("../utils/chromeFinder");
 const router = express.Router();
 
 const SCHEDULER_URL = process.env.UTS_SCHEDULER_URL || "http://localhost:5050";
@@ -56,17 +56,13 @@ router.get("/", async (req, res) => {
     return m ? m[1] : out;
   });
 
-  // --- Chrome / Chromium ---
+  // --- Chrome / Chromium (never launches the browser) ---
   const chromeBinary = getChromeBinary();
   if (chromeBinary) {
-    // Get version from the detected binary
-    const versionResult = await checkCommand(chromeBinary, ["--version"], (out) => {
-      const m = out.match(/([\d.]+)/);
-      return m ? m[1] : out;
-    });
+    const version = getChromeVersion();
     checks.chrome = {
       ok: true,
-      version: versionResult.ok ? versionResult.version : "installed",
+      version: version || "installed",
       binary: chromeBinary,
     };
   } else {

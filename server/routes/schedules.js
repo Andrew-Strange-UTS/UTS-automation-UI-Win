@@ -76,9 +76,22 @@ async function enrichAndProxy(req, res) {
     if (body.sequencePayload && body.sequencePayload.sequence) {
       body.bundledSecrets = gatherSecrets();
       body.bundledTestCode = {};
+      body.bundledImages = {};
       for (const test of body.sequencePayload.sequence) {
         const code = readTestCode(test);
         body.bundledTestCode[test.builtin || test.name] = code;
+        // Bundle images from the test's images/ folder
+        if (!test.builtin) {
+          const { TESTS_ROOT: configuredRoot } = require("../utils/paths");
+          const imagesDir = path.join(configuredRoot, test.name, "images");
+          if (fs.existsSync(imagesDir)) {
+            body.bundledImages[test.name] = {};
+            const files = fs.readdirSync(imagesDir).filter(f => /\.(png|jpg|jpeg|bmp)$/i.test(f));
+            for (const file of files) {
+              body.bundledImages[test.name][file] = fs.readFileSync(path.join(imagesDir, file)).toString("base64");
+            }
+          }
+        }
       }
     }
 

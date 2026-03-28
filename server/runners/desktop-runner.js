@@ -1,15 +1,23 @@
 // server/runners/desktop-runner.js
 // Desktop automation runner using PowerShell + Windows APIs
 // Provides a driver-like API that test scripts can use
+// Includes image OCR and template matching capabilities
 
-const { exec, spawn } = require("child_process");
+const { exec } = require("child_process");
 const path = require("path");
+const os = require("os");
+const fs = require("fs");
+const { cropAndSave, ocrFromImage, findImageOnScreen, terminateWorker } = require("../utils/image-utils");
 
 /**
  * Creates a desktop automation context that test scripts receive as `driver`.
  * Uses PowerShell under the hood for keyboard, mouse, and window operations.
+ * @param {object} options
+ * @param {object} options.context — mutable context object; the harness sets context.imagesDir per step
  */
-function createDesktopDriver() {
+function createDesktopDriver(options = {}) {
+  const context = options.context || { imagesDir: null };
+
   function runPowerShell(script) {
     return new Promise((resolve, reject) => {
       exec(
@@ -23,10 +31,23 @@ function createDesktopDriver() {
     });
   }
 
+  // Resolve an image reference to an absolute path
+  function resolveImagePath(ref) {
+    if (path.isAbsolute(ref)) return ref;
+    if (context.imagesDir) return path.join(context.imagesDir, ref);
+    throw new Error(`Relative image path "${ref}" but no imagesDir configured. Use an absolute path or ensure your test has an images/ folder.`);
+  }
+
+  // Take a full-screen screenshot to a temp file and return its path
+  async function takeTempScreenshot() {
+    const tmpFile = path.join(os.tmpdir(), `marvin-screenshot-${Date.now()}.png`);
+    await driver.screenshot(tmpFile);
+    return tmpFile;
+  }
+
   const driver = {
     // --- Keyboard ---
     async type(text) {
-      // Use .NET SendKeys for typing text
       const escaped = text
         .replace(/\\/g, "\\\\")
         .replace(/'/g, "''")
@@ -40,19 +61,10 @@ function createDesktopDriver() {
     },
 
     async keyPress(...keys) {
-      // Map common key names to SendKeys format
       const keyMap = {
-        Enter: "{ENTER}",
-        Tab: "{TAB}",
-        Escape: "{ESC}",
-        Backspace: "{BS}",
-        Delete: "{DEL}",
-        Up: "{UP}",
-        Down: "{DOWN}",
-        Left: "{LEFT}",
-        Right: "{RIGHT}",
-        Home: "{HOME}",
-        End: "{END}",
+        Enter: "{ENTER}", Tab: "{TAB}", Escape: "{ESC}", Backspace: "{BS}",
+        Delete: "{DEL}", Up: "{UP}", Down: "{DOWN}", Left: "{LEFT}",
+        Right: "{RIGHT}", Home: "{HOME}", End: "{END}",
         F1: "{F1}", F2: "{F2}", F3: "{F3}", F4: "{F4}",
         F5: "{F5}", F6: "{F6}", F7: "{F7}", F8: "{F8}",
         F9: "{F9}", F10: "{F10}", F11: "{F11}", F12: "{F12}",
@@ -64,7 +76,6 @@ function createDesktopDriver() {
         else if (key === "Alt") combo += "%";
         else if (key === "Shift") combo += "+";
         else if (key === "Win" || key === "Meta") {
-          // Win key needs special handling — use PowerShell WScript
           await runPowerShell(
             `$wsh = New-Object -ComObject WScript.Shell; $wsh.SendKeys('^{ESC}')`
           );
@@ -81,7 +92,6 @@ function createDesktopDriver() {
     },
 
     async hotkey(modifier, key) {
-      // Shortcut for common combos like hotkey("Ctrl", "a")
       await driver.keyPress(modifier, key);
     },
 
@@ -93,7 +103,6 @@ function createDesktopDriver() {
     },
 
     async mouseClick(x, y, button = "left") {
-      // Move then click using Win32 API
       const btnDown = button === "right" ? "0x0008" : "0x0002";
       const btnUp = button === "right" ? "0x0010" : "0x0004";
       await runPowerShell(`
@@ -153,7 +162,7 @@ if ($proc) {
     // --- Application lifecycle ---
     async launch(exePath, args = "") {
       await runPowerShell(`Start-Process '${exePath}' ${args ? `'${args}'` : ""}`);
-      await driver.pause(2000); // Wait for app to start
+      await driver.pause(2000);
     },
 
     async closeWindow() {
@@ -179,13 +188,105 @@ $bitmap.Dispose();
 `);
     },
 
+    // --- Image: Screenshot region ---
+    async screenshotRegion(outputPath, region) {
+      const tmpFile = await takeTempScreenshot();
+      try {
+        await cropAndSave(tmpFile, region, outputPath);
+      } finally {
+        try { fs.unlinkSync(tmpFile); } catch {}
+      }
+      return outputPath;
+    },
+
+    // --- Image: OCR (read text from screen) ---
+    async readText(region, options = {}) {
+      const tmpFile = await takeTempScreenshot();
+      try {
+        let imageInput = tmpFile;
+        if (region) {
+          const croppedPath = tmpFile + ".crop.png";
+          await cropAndSave(tmpFile, region, croppedPath);
+          imageInput = croppedPath;
+        }
+        const result = await ocrFromImage(imageInput, options);
+        // Clean up cropped file
+        if (region) {
+          try { fs.unlinkSync(imageInput); } catch {}
+        }
+        return result;
+      } finally {
+        try { fs.unlinkSync(tmpFile); } catch {}
+      }
+    },
+
+    // --- Image: Find reference image on screen ---
+    async findImage(referenceImage, options = {}) {
+      const needlePath = resolveImagePath(referenceImage);
+      if (!fs.existsSync(needlePath)) {
+        throw new Error(`Reference image not found: ${needlePath}`);
+      }
+      const tmpFile = await takeTempScreenshot();
+      try {
+        return await findImageOnScreen(tmpFile, needlePath, options);
+      } finally {
+        try { fs.unlinkSync(tmpFile); } catch {}
+      }
+    },
+
+    // --- Image: Wait for image to appear on screen ---
+    async waitForImage(referenceImage, options = {}) {
+      const timeout = options.timeout || 10000;
+      const interval = options.interval || 1000;
+      const start = Date.now();
+
+      while (Date.now() - start < timeout) {
+        const match = await driver.findImage(referenceImage, options);
+        if (match.found) return match;
+        await driver.pause(interval);
+      }
+
+      throw new Error(`Image "${referenceImage}" not found on screen within ${timeout}ms`);
+    },
+
+    // --- Image: Find image and click its center ---
+    async clickImage(referenceImage, options = {}) {
+      const match = await driver.findImage(referenceImage, options);
+      if (!match.found) {
+        throw new Error(`Image "${referenceImage}" not found on screen (confidence: ${match.confidence?.toFixed(2)})`);
+      }
+      const clickX = match.centerX + (options.offsetX || 0);
+      const clickY = match.centerY + (options.offsetY || 0);
+      await driver.mouseClick(clickX, clickY, options.button || "left");
+      return match;
+    },
+
+    // --- Image: Wait for text to appear on screen ---
+    async waitForText(expectedText, region, options = {}) {
+      const timeout = options.timeout || 10000;
+      const interval = options.interval || 1000;
+      const exact = options.exact || false;
+      const start = Date.now();
+
+      while (Date.now() - start < timeout) {
+        const result = await driver.readText(region, options);
+        const found = exact
+          ? result.text === expectedText
+          : result.text.toLowerCase().includes(expectedText.toLowerCase());
+        if (found) return result;
+        await driver.pause(interval);
+      }
+
+      throw new Error(`Text "${expectedText}" not found on screen within ${timeout}ms`);
+    },
+
     // --- Cleanup ---
     async quit() {
-      // No persistent session to clean up
+      await terminateWorker();
     },
 
     async deleteSession() {
-      // Compatibility with Appium-style teardown
+      await terminateWorker();
     },
   };
 

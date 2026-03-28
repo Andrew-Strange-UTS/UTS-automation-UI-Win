@@ -23,7 +23,7 @@ app.use(cors({
     callback(null, true); // permissive for desktop app
   },
 }));
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "50mb" }));
 
 // Routes
 const gitRoutes = require("./routes/git");

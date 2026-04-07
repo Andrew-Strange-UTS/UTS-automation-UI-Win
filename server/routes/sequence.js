@@ -85,12 +85,14 @@ router.post("/run", async (req, res) => {
       : `  // Using default Chrome location`;
 
     const driverSetupCode = isDesktop ? `
+  const path = require("path");
   const { createDesktopDriver } = require(${JSON.stringify(desktopRunnerPath)});
+  const driverContext = { imagesDir: null };
   let driver;
   let failedCount = 0;
   let passedCount = 0;
   try {
-    driver = createDesktopDriver();
+    driver = createDesktopDriver({ context: driverContext });
     console.log("Desktop driver ready (PowerShell + Windows APIs)");
 ` : `
   const remoteUrl = process.env.SELENIUM_REMOTE_URL;
@@ -180,6 +182,9 @@ ${driverSetupCode}
         });
       };
       try {
+        if (typeof driverContext !== "undefined") {
+          driverContext.imagesDir = path.join(${JSON.stringify(TESTS_ROOT)}, testName, "images");
+        }
         console.log("▶ Running step #" + (i + 1) + " [" + testName + "]");
         await fn(driver, testParams, zephyrLog);
         console.log("✅ Finished step #" + (i + 1) + " [" + testName + "]");

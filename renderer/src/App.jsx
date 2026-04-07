@@ -10,8 +10,20 @@ import SchedulePanel from "@/components/SchedulePanel";
 import StartupChecks from "@/components/StartupChecks";
 import { BACKEND_URL, WS_URL } from "@/config";
 import theme from "@/theme";
+import marvinQuotes from "@/marvinQuotes";
 export default function App() {
   const [showStartupChecks, setShowStartupChecks] = useState(true);
+  const [quoteIndex, setQuoteIndex] = useState(() => Math.floor(Math.random() * marvinQuotes.length));
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setQuoteIndex((prev) => {
+        let next;
+        do { next = Math.floor(Math.random() * marvinQuotes.length); } while (next === prev && marvinQuotes.length > 1);
+        return next;
+      });
+    }, 20000);
+    return () => clearInterval(interval);
+  }, []);
   // Refs for log state
   const sequenceBufferRef = useRef("");
   const logsAccumulatorRef = useRef({});
@@ -341,7 +353,7 @@ export default function App() {
     '    zephyrLog("Launched Notepad successfully.", "Pass");',
     '',
     '    log("Typing test text...");',
-    '    await driver.type("Hello from UTS Windows Automation!");',
+    '    await driver.type("Hello from Marvin!");',
     '    await driver.pause(1000);',
     '    zephyrLog("Typed test text into Notepad.", "Pass");',
     '',
@@ -369,7 +381,26 @@ export default function App() {
   return (
     <div style={{ display: "flex" }}>
       <div style={{ flex: 1, minWidth: 0, padding: "20px", overflow: "hidden" }}>
-        <h1 style={{ textAlign: "center" }}>UTS Automation UI</h1>
+        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "20px", marginBottom: "8px" }}>
+          <h1 style={{ margin: 0, fontSize: "42px" }}>Marvin</h1>
+          <img
+            src="/img/marvin.png"
+            alt="Marvin"
+            style={{ height: "100px", width: "auto", objectFit: "contain" }}
+            onError={(e) => { e.target.style.display = "none"; }}
+          />
+        </div>
+        <div style={{
+          textAlign: "center", margin: "0 auto 20px", maxWidth: "770px",
+          height: "80px", display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <p style={{
+            fontStyle: "italic", color: "#888", fontSize: "18px", margin: 0,
+            lineHeight: "1.4",
+          }}>
+            "{marvinQuotes[quoteIndex]}"
+          </p>
+        </div>
         <div
           style={{
             display: "flex",

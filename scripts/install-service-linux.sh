@@ -1,6 +1,6 @@
 #!/bin/bash
 # scripts/install-service-linux.sh
-# Installs the UTS Scheduler as a systemd service.
+# Installs the Marvin Scheduler as a systemd service.
 # Run: sudo bash scripts/install-service-linux.sh
 
 set -e
@@ -20,7 +20,7 @@ if [ -z "$NODE_BIN" ]; then
   exit 1
 fi
 
-echo "Installing UTS Automation Scheduler service..."
+echo "Installing Marvin Scheduler service..."
 echo "  Node: $NODE_BIN"
 echo "  Script: $SERVICE_SCRIPT"
 echo "  Data: $DATA_DIR"
@@ -32,7 +32,7 @@ chmod 755 "$DATA_DIR"
 # Create systemd unit file
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=UTS Automation Scheduler Service
+Description=Marvin Scheduler Service
 After=network.target
 
 [Service]
@@ -59,7 +59,7 @@ systemctl enable "$SERVICE_NAME"
 systemctl start "$SERVICE_NAME"
 
 echo ""
-echo "UTS Automation Scheduler service installed and started."
+echo "Marvin Scheduler service installed and started."
 echo "  Status:  sudo systemctl status $SERVICE_NAME"
 echo "  Logs:    sudo journalctl -u $SERVICE_NAME -f"
 echo "  Stop:    sudo systemctl stop $SERVICE_NAME"

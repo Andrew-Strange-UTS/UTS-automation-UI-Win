@@ -1,8 +1,8 @@
-# Creating Tests for UTS Automation UI
+# Creating Tests for Marvin
 
 ## How Tests Work
 
-UTS Automation UI loads tests from a GitHub repository. The app clones your repo and looks for a `tests/` folder at the root. Each subfolder inside `tests/` becomes a test card in the UI.
+Marvin loads tests from a GitHub repository. The app clones your repo and looks for a `tests/` folder at the root. Each subfolder inside `tests/` becomes a test card in the UI.
 
 ```
 your-repo/
@@ -180,7 +180,7 @@ module.exports = async function (driver, parameters = {}, zephyrLog) {
     zephyrLog("Launched Notepad successfully.", "Pass");
 
     log("Typing test text...");
-    await driver.type("Hello from UTS Automation!");
+    await driver.type("Hello from Marvin!");
     await driver.pause(1000);
     zephyrLog("Typed text into Notepad.", "Pass");
 
@@ -217,6 +217,135 @@ module.exports = async function (driver, parameters = {}, zephyrLog) {
 | `driver.quit()` | No-op (desktop driver has no persistent session) |
 
 **Modifier keys for `keyPress`:** `"Ctrl"` / `"Control"`, `"Alt"`, `"Shift"`, `"Win"` / `"Meta"`
+
+---
+
+## Image OCR and Recognition (Desktop Tests)
+
+Desktop tests can use image-based automation to read text from the screen (OCR) and find reference images on screen (template matching). This is useful for automating apps where you can't easily target elements by window title or coordinates.
+
+### Test folder structure with images
+
+Add an `images/` folder inside your test folder with reference images:
+
+```
+your-test-repo/
+  tests/
+    My-Desktop-Test/
+      run.js
+      metadata.json
+      images/
+        ok-button.png       <-- screenshot of the button you want to click
+        save-dialog.png     <-- screenshot of a dialog you want to detect
+        error-message.png
+```
+
+Reference images should be small, tightly cropped screenshots of the UI element you want to find. Smaller images = faster matching.
+
+### Image Driver API
+
+| Method | Description |
+|---|---|
+| `driver.readText(region?, options?)` | Take a screenshot, run OCR, return `{ text, confidence, words }`. If `region` is provided (`{ x, y, width, height }`), only that area is scanned. |
+| `driver.findImage("ok-button.png", options?)` | Take a screenshot and find where the reference image appears. Returns `{ found, x, y, centerX, centerY, confidence }`. |
+| `driver.waitForImage("dialog.png", options?)` | Poll `findImage` until the image appears or timeout. Throws if not found. |
+| `driver.clickImage("ok-button.png", options?)` | Find the image on screen and click its center. Throws if not found. |
+| `driver.waitForText("expected text", region?, options?)` | Poll OCR until the expected text appears on screen. Throws if not found within timeout. |
+| `driver.screenshotRegion(outputPath, region)` | Capture a specific screen region and save to file. |
+
+**Options for `findImage` / `clickImage`:**
+- `threshold` — Match confidence threshold, 0 to 1 (default: `0.85`)
+- `region` — Narrow the search area: `{ x, y, width, height }`
+- `offsetX`, `offsetY` — Offset the click from the image center (clickImage only)
+
+**Options for `waitForImage` / `waitForText`:**
+- `timeout` — Max wait in ms (default: `10000`)
+- `interval` — Poll interval in ms (default: `1000`)
+
+**Options for `readText`:**
+- `lang` — OCR language (default: `"eng"`)
+
+### Image OCR Example
+
+```js
+function log(msg) {
+  process.stdout.write(`${msg}\n`);
+}
+
+module.exports = async function (driver, parameters = {}, zephyrLog) {
+  if (typeof zephyrLog !== "function") zephyrLog = function () {};
+
+  try {
+    log("Launching Calculator...");
+    await driver.launch("calc.exe");
+    await driver.pause(2000);
+
+    // Read text from a specific screen region
+    const result = await driver.readText({ x: 100, y: 200, width: 400, height: 50 });
+    log("OCR result: " + result.text);
+
+    // Wait for specific text to appear anywhere on screen
+    await driver.waitForText("Calculator", null, { timeout: 5000 });
+    log("PASS: Calculator text found on screen.");
+    zephyrLog("Calculator text detected via OCR.", "Pass");
+  } catch (err) {
+    zephyrLog("FAIL: " + (err && err.message), "Fail");
+    throw err;
+  }
+};
+```
+
+### Image Recognition Example
+
+```js
+function log(msg) {
+  process.stdout.write(`${msg}\n`);
+}
+
+module.exports = async function (driver, parameters = {}, zephyrLog) {
+  if (typeof zephyrLog !== "function") zephyrLog = function () {};
+
+  try {
+    log("Launching app...");
+    await driver.launch("myapp.exe");
+    await driver.pause(3000);
+
+    // Wait for a dialog to appear (image must be in test's images/ folder)
+    log("Waiting for login dialog...");
+    await driver.waitForImage("login-dialog.png", { timeout: 15000 });
+    zephyrLog("Login dialog appeared.", "Pass");
+
+    // Click a button by its image
+    log("Clicking OK button...");
+    await driver.clickImage("ok-button.png");
+    zephyrLog("Clicked OK button.", "Pass");
+
+    // Find an image and check if it exists (without throwing)
+    const match = await driver.findImage("error-icon.png", { threshold: 0.9 });
+    if (match.found) {
+      throw new Error("Error icon detected on screen!");
+    }
+    log("PASS: No error icons found.");
+    zephyrLog("No error icons detected.", "Pass");
+  } catch (err) {
+    zephyrLog("FAIL: " + (err && err.message), "Fail");
+    throw err;
+  }
+};
+```
+
+### Tips for reference images
+
+- **Crop tightly** — Only include the exact UI element, not surrounding whitespace
+- **Use PNG** — Lossless format avoids compression artefacts that hurt matching
+- **Keep them small** — 20x20 to 200x200 pixels is ideal. Larger images are slower to match
+- **Avoid dynamic content** — Don't include text that changes (timestamps, counters) in reference images
+- **Test at the same resolution** — Reference images must match the screen resolution they'll run on
+- **Lower threshold if needed** — If matching fails due to slight rendering differences, try `{ threshold: 0.75 }`
+
+### Scheduled tests with images
+
+When you create a schedule, all images from each test's `images/` folder are automatically bundled (base64 encoded) into the schedule. They're also included in `.utsb` export/import bundles. No extra steps needed.
 
 ---
 
@@ -315,7 +444,7 @@ OKTA options are only shown on web test cards (not desktop).
 
 Schedules are managed by a standalone **scheduler service** that runs as a system-wide background process (separate from the Electron app). When you create a schedule:
 
-1. The app bundles your current secrets and test code into the schedule
+1. The app bundles your current secrets, test code, and images into the schedule
 2. The schedule is sent to the scheduler service (running on port 5050)
 3. The service runs your tests on the cron schedule, even when no one has the Electron app open
 
@@ -361,6 +490,9 @@ your-test-repo/
     Test-Name/
       run.js              # Required — your test script
       metadata.json       # Optional — title + parameter definitions
+      images/             # Optional — reference images for OCR/recognition
+        ok-button.png
+        dialog.png
     Another-Test/
       run.js
       metadata.json
@@ -383,7 +515,7 @@ Copy the prompt below and give it to any AI assistant when you need help writing
 ### Prompt
 
 ```
-I'm writing a test for UTS Automation UI — an Electron desktop app that runs automated
+I'm writing a test for Marvin — an Electron desktop app that runs automated
 tests via a Node.js backend. It runs on both Windows and Ubuntu/Linux.
 Tests are stored in a GitHub repo under a tests/ folder.
 Each test is a subfolder containing a run.js and optionally a metadata.json.
@@ -413,6 +545,8 @@ FOR WEB TESTS (works on Windows and Linux):
 
 FOR DESKTOP TESTS (Windows only):
 - driver is a Desktop Driver with these methods:
+
+  Keyboard & Mouse:
   - driver.type(text) — type text via SendKeys
   - driver.keyPress(...keys) — press keys. Modifiers: "Ctrl", "Alt", "Shift", "Win"
     Keys: "Enter", "Tab", "Escape", "Backspace", "Delete", "Up", "Down", "Left",
@@ -421,14 +555,38 @@ FOR DESKTOP TESTS (Windows only):
   - driver.mouseMove(x, y) — move cursor to screen coordinates
   - driver.mouseClick(x, y, button?) — click at coordinates ("left" default, or "right")
   - driver.doubleClick(x, y) — double-click at coordinates
+
+  Window management:
   - driver.findWindow(titlePattern) — find window by partial title, returns handle
   - driver.focusWindow(titlePattern) — bring window to foreground by partial title
   - driver.getWindowTitle() — get focused window title
   - driver.launch(exePath, args?) — launch an app (waits 2s after)
   - driver.closeWindow() — send Alt+F4
+
+  Utilities:
   - driver.pause(ms) — wait ms milliseconds
   - driver.screenshot(outputPath) — take a screenshot
+
+  Image OCR & Recognition (put reference images in tests/YourTest/images/):
+  - driver.readText(region?, options?) — OCR: screenshot the screen (or a region
+    {x,y,width,height}), returns { text, confidence, words }
+  - driver.findImage("button.png", options?) — find a reference image on screen,
+    returns { found, x, y, centerX, centerY, confidence }
+  - driver.waitForImage("dialog.png", options?) — poll until image appears (timeout default 10s)
+  - driver.clickImage("button.png", options?) — find image and click its center
+  - driver.waitForText("expected", region?, options?) — poll OCR until text appears
+  - driver.screenshotRegion(outputPath, {x,y,width,height}) — capture a screen region
+  Options: threshold (0-1, default 0.85), timeout (ms), interval (ms), region, offsetX/Y
+
 - Do NOT create or quit the driver — the runner handles that.
+
+TEST FOLDER STRUCTURE:
+  tests/MyTest/
+    run.js           — test script
+    metadata.json    — optional config
+    images/          — optional reference images for OCR/recognition
+      button.png
+      dialog.png
 
 METADATA (metadata.json) — optional, placed alongside run.js:
 {

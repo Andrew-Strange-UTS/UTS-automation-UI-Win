@@ -14,7 +14,7 @@ function createWindow() {
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    title: "UTS Automation UI",
+    title: "Marvin",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,

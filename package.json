@@ -1,7 +1,7 @@
 {
-  "name": "uts-win-automation-ui",
+  "name": "marvin",
   "version": "1.0.0",
-  "description": "UTS Windows Desktop Automation UI",
+  "description": "Marvin — Desktop and Web Test Automation",
   "main": "main/main.js",
   "scripts": {
     "start": "electron .",
@@ -19,8 +19,8 @@
     "wait-on": "^8.0.3"
   },
   "build": {
-    "appId": "com.uts.win-automation",
-    "productName": "UTS Automation UI",
+    "appId": "com.uts.marvin",
+    "productName": "Marvin",
     "win": {
       "target": "nsis",
       "icon": "resources/icons/icon.ico"

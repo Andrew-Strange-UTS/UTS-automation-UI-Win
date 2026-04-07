@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // server/scheduler-service.js
-// Standalone scheduler service — runs as a system-wide background process.
+// Marvin scheduler service — runs as a system-wide background process.
 // All users share the same schedules, secrets, and logs.
 // Exposes a REST API on port 5050 (configurable via UTS_SCHEDULER_PORT).
 
@@ -50,7 +50,7 @@ copyIfMissing(
 copyIfMissing(
   path.join(__dirname, "utils"),
   paths.UTILS_DIR,
-  ["zephyr.js"]
+  ["zephyr.js", "image-utils.js"]
 );
 
 // ─── Secrets store (own encryption key in shared data dir) ───
@@ -227,6 +227,23 @@ function compileAndRun(schedule, onLog, onDone) {
     }
   }
 
+  // Restore bundled images
+  const bundledImages = schedule.bundledImages || {};
+  for (const test of sequence) {
+    if (test.builtin) continue;
+    const testImages = bundledImages[test.name];
+    if (testImages) {
+      const imagesDir = path.join(paths.TESTS_ROOT, test.name, "images");
+      fs.mkdirSync(imagesDir, { recursive: true });
+      for (const [filename, b64data] of Object.entries(testImages)) {
+        const imgPath = path.join(imagesDir, filename);
+        if (!fs.existsSync(imgPath)) {
+          fs.writeFileSync(imgPath, Buffer.from(b64data, "base64"));
+        }
+      }
+    }
+  }
+
   const zephyrToken = allSecrets["ZEPHYR_API_TOKEN"] || "";
   const desktopRunnerPath = path.join(paths.RUNNERS_DIR, "desktop-runner.js");
   const zephyrPath = path.join(paths.UTILS_DIR, "zephyr.js");
@@ -236,12 +253,14 @@ function compileAndRun(schedule, onLog, onDone) {
     : `  // Using default Chrome location`;
 
   const driverSetupCode = isDesktop ? `
+  const path = require("path");
   const { createDesktopDriver } = require(${JSON.stringify(desktopRunnerPath)});
+  const driverContext = { imagesDir: null };
   let driver;
   let failedCount = 0;
   let passedCount = 0;
   try {
-    driver = createDesktopDriver();
+    driver = createDesktopDriver({ context: driverContext });
     console.log("Desktop driver ready (PowerShell + Windows APIs)");
 ` : `
   const remoteUrl = process.env.SELENIUM_REMOTE_URL;
@@ -321,6 +340,9 @@ ${driverSetupCode}
         zephyrStepResults.push({ statusName: status || "Pass", actualResult: String(actualResult) });
       };
       try {
+        if (typeof driverContext !== "undefined") {
+          driverContext.imagesDir = path.join(${JSON.stringify(paths.TESTS_ROOT)}, testName, "images");
+        }
         console.log("▶ Running step #" + (i + 1) + " [" + testName + "]");
         await fn(driver, testParams, zephyrLog);
         console.log("✅ Finished step #" + (i + 1) + " [" + testName + "]");
@@ -526,6 +548,7 @@ function safeSchedule(s) {
     sequencePayload: undefined,
     bundledSecrets: undefined,
     bundledTestCode: undefined,
+    bundledImages: undefined,
     isRunning: isRunning(s.id),
     stepNames: s.sequencePayload?.sequence?.map((t) => t.name) || [],
     zephyrSteps: (s.sequencePayload?.sequence || [])
@@ -538,7 +561,7 @@ function safeSchedule(s) {
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "50mb" }));
 
 // Health check
 app.get("/api/health", (req, res) => {
@@ -565,7 +588,7 @@ app.get("/api/schedules/:id/logs", (req, res) => {
 // Create schedule
 app.post("/api/schedules", (req, res) => {
   const { name, sequencePayload, time, days, ntfyTopic, teamsWebhookAll, teamsWebhookFail,
-          bundledSecrets: reqSecrets, bundledTestCode: reqCode } = req.body;
+          bundledSecrets: reqSecrets, bundledTestCode: reqCode, bundledImages: reqImages } = req.body;
 
   if (!name || !sequencePayload || !time || !days || !Array.isArray(days) || days.length === 0) {
     return res.status(400).json({ error: "Required: name, sequencePayload, time (HH:MM), days (array)" });
@@ -586,6 +609,7 @@ app.post("/api/schedules", (req, res) => {
     sequencePayload,
     bundledSecrets: reqSecrets || {},
     bundledTestCode: reqCode || {},
+    bundledImages: reqImages || {},
     time,
     days: days.map((d) => d.toLowerCase()),
     ntfyTopic: ntfyTopic || "",
@@ -691,6 +715,7 @@ app.post("/api/schedules/:id/export", (req, res) => {
     sequencePayload: schedule.sequencePayload,
     bundledSecrets: schedule.bundledSecrets || {},
     bundledTestCode: schedule.bundledTestCode || {},
+    bundledImages: schedule.bundledImages || {},
   };
 
   const encrypted = portableEncrypt(bundle, password);
@@ -734,6 +759,18 @@ app.post("/api/schedules/import", (req, res) => {
     }
   }
 
+  // Restore bundled images
+  if (bundle.bundledImages) {
+    for (const [testName, images] of Object.entries(bundle.bundledImages)) {
+      if (!images) continue;
+      const imagesDir = path.join(paths.TESTS_ROOT, testName, "images");
+      fs.mkdirSync(imagesDir, { recursive: true });
+      for (const [filename, b64data] of Object.entries(images)) {
+        fs.writeFileSync(path.join(imagesDir, filename), Buffer.from(b64data, "base64"));
+      }
+    }
+  }
+
   // Merge bundled secrets
   const importedSecrets = [];
   if (bundle.bundledSecrets) {
@@ -749,6 +786,7 @@ app.post("/api/schedules/import", (req, res) => {
     sequencePayload: bundle.sequencePayload,
     bundledSecrets: bundle.bundledSecrets || {},
     bundledTestCode: bundle.bundledTestCode || {},
+    bundledImages: bundle.bundledImages || {},
     time: bundle.schedule.time,
     days: bundle.schedule.days,
     ntfyTopic: bundle.schedule.ntfyTopic || "",

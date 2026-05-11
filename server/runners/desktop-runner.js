@@ -127,6 +127,40 @@ Start-Sleep -Milliseconds 100;
       await driver.mouseClick(x, y);
     },
 
+    async tripleClick(x, y) {
+      await driver.mouseClick(x, y);
+      await driver.pause(80);
+      await driver.mouseClick(x, y);
+      await driver.pause(80);
+      await driver.mouseClick(x, y);
+    },
+
+    // Click while holding Shift — used for range-selecting text from a prior click to (x, y).
+    async shiftClick(x, y, button = "left") {
+      const btnDown = button === "right" ? "0x0008" : "0x0002";
+      const btnUp = button === "right" ? "0x0010" : "0x0004";
+      // VK_SHIFT = 0x10, KEYEVENTF_KEYUP = 0x0002
+      await runPowerShell(`
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class ShiftClickOps {
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, int dwExtraInfo);
+    [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
+}
+"@
+[ShiftClickOps]::SetCursorPos(${x}, ${y});
+Start-Sleep -Milliseconds 100;
+[ShiftClickOps]::keybd_event(0x10, 0, 0, 0);
+Start-Sleep -Milliseconds 50;
+[ShiftClickOps]::mouse_event(${btnDown}, 0, 0, 0, 0);
+[ShiftClickOps]::mouse_event(${btnUp}, 0, 0, 0, 0);
+Start-Sleep -Milliseconds 50;
+[ShiftClickOps]::keybd_event(0x10, 0, 0x0002, 0);
+`);
+    },
+
     // --- Window management ---
     async findWindow(titlePattern) {
       const result = await runPowerShell(
@@ -150,6 +184,26 @@ if ($proc) {
     [WinFocus]::ShowWindow($proc.MainWindowHandle, 9);
     [WinFocus]::SetForegroundWindow($proc.MainWindowHandle);
 }
+`);
+    },
+
+    // Maximise a window matched by title (substring match on MainWindowTitle),
+    // or the current foreground window if no titlePattern is given.
+    async maximizeWindow(titlePattern) {
+      const lookup = titlePattern
+        ? `$proc = Get-Process | Where-Object {$_.MainWindowTitle -like '*${titlePattern}*'} | Select-Object -First 1; if ($proc) { $h = $proc.MainWindowHandle; [WinMax]::SetForegroundWindow($h); [WinMax]::ShowWindow($h, 3) | Out-Null }`
+        : `$h = [WinMax]::GetForegroundWindow(); [WinMax]::ShowWindow($h, 3) | Out-Null`;
+      await runPowerShell(`
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class WinMax {
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+}
+"@
+${lookup}
 `);
     },
 

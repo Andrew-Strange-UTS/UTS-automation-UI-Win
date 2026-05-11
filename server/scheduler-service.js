@@ -40,7 +40,7 @@ function copyIfMissing(srcDir, destDir, files) {
 copyIfMissing(
   path.join(__dirname, "builtins"),
   paths.BUILTINS_DIR,
-  ["default-test.js", "desktop-sample.js", "okta-login.js", "okta-login-finish.js"]
+  ["default-test.js", "desktop-sample.js", "desktop-showcase.js", "okta-login.js", "okta-login-finish.js"]
 );
 copyIfMissing(
   path.join(__dirname, "runners"),

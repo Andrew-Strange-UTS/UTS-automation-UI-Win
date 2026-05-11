@@ -206,14 +206,23 @@ module.exports = async function (driver, parameters = {}, zephyrLog) {
 | `driver.hotkey(modifier, key)` | Shortcut for combos like `hotkey("Ctrl", "a")` |
 | `driver.mouseMove(x, y)` | Move cursor to screen coordinates |
 | `driver.mouseClick(x, y, button?)` | Click at coordinates. `button` is `"left"` (default) or `"right"` |
-| `driver.doubleClick(x, y)` | Double-click at coordinates |
+| `driver.doubleClick(x, y)` | Double-click at coordinates — selects the word under the cursor in most apps |
+| `driver.tripleClick(x, y)` | Triple-click at coordinates — selects the whole line/paragraph in most apps |
+| `driver.shiftClick(x, y, button?)` | Click while holding Shift. Combine with a prior `mouseClick` to range-select text from the first click point to here |
 | `driver.findWindow(titlePattern)` | Find a window by partial title match, returns window handle |
 | `driver.focusWindow(titlePattern)` | Bring a window to the foreground by partial title match |
+| `driver.maximizeWindow(titlePattern?)` | Maximise a window matched by title (substring), or the current foreground window if no pattern is given |
 | `driver.getWindowTitle()` | Get the title of the currently focused window |
 | `driver.launch(exePath, args?)` | Launch an application (waits 2s after launch) |
 | `driver.closeWindow()` | Send Alt+F4 to close the focused window |
 | `driver.pause(ms)` | Wait for the given number of milliseconds |
 | `driver.screenshot(outputPath)` | Take a screenshot and save to the given path |
+| `driver.screenshotRegion(outputPath, region)` | Save a cropped region — `region = { x, y, width, height }` |
+| `driver.readText(region?, options?)` | OCR the screen (or a region) using Tesseract. Returns `{ text, confidence, words: [{ text, confidence, bbox: { x0, y0, x1, y1 } }] }` |
+| `driver.findImage(refImage, options?)` | Find a reference image on screen. Returns `{ found, confidence, centerX, centerY, ... }` |
+| `driver.clickImage(refImage, options?)` | Find image and click its centre |
+| `driver.waitForImage(refImage, options?)` | Poll until image appears or timeout |
+| `driver.waitForText(text, region?, options?)` | Poll until OCR finds the text or timeout |
 | `driver.quit()` | No-op (desktop driver has no persistent session) |
 
 **Modifier keys for `keyPress`:** `"Ctrl"` / `"Control"`, `"Alt"`, `"Shift"`, `"Win"` / `"Meta"`

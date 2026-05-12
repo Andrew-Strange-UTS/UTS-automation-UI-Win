@@ -89,10 +89,7 @@ module.exports = async function (driver, parameters = {}, zephyrLog) {
     const endY = Math.round((last.y0 + last.y1) / 2);
 
     log(`Click range start (${startX}, ${startY}) -> shift-click end (${endX}, ${endY})...`);
-    await driver.mouseClick(startX, startY);
-    await driver.pause(300);
-    await driver.shiftClick(endX, endY);
-    await driver.pause(500);
+    await driver.selectRange(startX, startY, endX, endY);
     zephyrLog("Highlighted target phrase via click + shift-click range.", "Pass");
 
     log("PASS: Showcase test completed successfully.");

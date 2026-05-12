@@ -23,7 +23,7 @@ function createDesktopDriver(options = {}) {
       const wrapped = `$ErrorActionPreference = 'Stop'; try { ${script} } catch { Write-Error $_; exit 1 }`;
       const encoded = Buffer.from(wrapped, "utf16le").toString("base64");
       exec(
-        `powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`,
+        `powershell -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`,
         { timeout: 30000, maxBuffer: 10 * 1024 * 1024 },
         (err, stdout, stderr) => {
           if (err) {

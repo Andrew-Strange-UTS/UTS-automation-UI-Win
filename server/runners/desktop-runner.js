@@ -17,14 +17,23 @@ const { cropAndSave, ocrFromImage, findImageOnScreen, terminateWorker } = requir
  */
 function createDesktopDriver(options = {}) {
   const context = options.context || { imagesDir: null };
-
+  
   function runPowerShell(script) {
     return new Promise((resolve, reject) => {
+      const wrapped = `$ErrorActionPreference = 'Stop'; try { ${script} } catch { Write-Error $_; exit 1 }`;
+      const encoded = Buffer.from(wrapped, "utf16le").toString("base64");
       exec(
-        `powershell -NoProfile -NonInteractive -Command "${script.replace(/"/g, '\\"')}"`,
-        { timeout: 30000 },
+        `powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`,
+        { timeout: 30000, maxBuffer: 10 * 1024 * 1024 },
         (err, stdout, stderr) => {
-          if (err) return reject(new Error(stderr || err.message));
+          if (err) {
+            const msg = [
+              `PowerShell exit ${err.code}`,
+              stderr && `stderr: ${stderr.trim()}`,
+              stdout && `stdout: ${stdout.trim()}`,
+            ].filter(Boolean).join("\n");
+            return reject(new Error(msg));
+          }
           resolve(stdout.trim());
         }
       );
@@ -49,7 +58,6 @@ function createDesktopDriver(options = {}) {
     // --- Keyboard ---
     async type(text) {
       const escaped = text
-        .replace(/\\/g, "\\\\")
         .replace(/'/g, "''")
         .replace(/\+/g, "{+}")
         .replace(/\^/g, "{^}")
@@ -227,7 +235,7 @@ ${lookup}
     async pause(ms) {
       return new Promise((resolve) => setTimeout(resolve, ms));
     },
-
+    
     async screenshot(outputPath) {
       await runPowerShell(`
 Add-Type -AssemblyName System.Windows.Forms;
@@ -235,10 +243,13 @@ Add-Type -AssemblyName System.Drawing;
 $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds;
 $bitmap = New-Object System.Drawing.Bitmap($screen.Width, $screen.Height);
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap);
-$graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size);
-$bitmap.Save('${outputPath.replace(/\\/g, "\\\\")}');
-$graphics.Dispose();
-$bitmap.Dispose();
+try {
+  $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size);
+  $bitmap.Save('${outputPath}');
+} finally {
+  $graphics.Dispose();
+  $bitmap.Dispose();
+}
 `);
     },
 

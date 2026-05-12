@@ -47,11 +47,28 @@ async function cropAndSave(screenshotPath, region, outputPath) {
 async function ocrFromImage(imagePathOrBuffer, options = {}) {
   const lang = options.lang || "eng";
   const worker = await getWorker(lang);
-  const result = await worker.recognize(imagePathOrBuffer);
+  // Pass `blocks: true` so word-level data is included in the result.
+  const result = await worker.recognize(imagePathOrBuffer, {}, { blocks: true });
+
+  // Find words at the top level (old API) or flatten from blocks (new API).
+  let words = result.data.words;
+  if (!words || words.length === 0) {
+    words = [];
+    for (const block of result.data.blocks || []) {
+      for (const para of block.paragraphs || []) {
+        for (const line of para.lines || []) {
+          for (const word of line.words || []) {
+            words.push(word);
+          }
+        }
+      }
+    }
+  }
+
   return {
-    text: result.data.text.trim(),
+    text: (result.data.text || "").trim(),
     confidence: result.data.confidence,
-    words: result.data.words.map((w) => ({
+    words: words.map((w) => ({
       text: w.text,
       confidence: w.confidence,
       bbox: w.bbox,

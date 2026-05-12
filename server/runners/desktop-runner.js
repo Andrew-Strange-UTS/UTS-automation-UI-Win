@@ -169,6 +169,54 @@ Start-Sleep -Milliseconds 50;
 `);
     },
 
+    // Atomic click + shift-click range selection. Both events fire in one PowerShell
+// process so the cursor can't drift / revert between them.
+async selectRange(x1, y1, x2, y2) {
+  const output = await runPowerShell(`
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class RangeOps {
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
+    [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, int dwExtraInfo);
+    [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
+    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
+}
+"@
+
+function Move-AndVerify($x, $y) {
+  for ($i = 0; $i -lt 5; $i++) {
+    [RangeOps]::SetCursorPos($x, $y) | Out-Null
+    Start-Sleep -Milliseconds 40
+    $p = New-Object RangeOps+POINT
+    [RangeOps]::GetCursorPos([ref]$p) | Out-Null
+    if ([Math]::Abs($p.X - $x) -le 2 -and [Math]::Abs($p.Y - $y) -le 2) { return $true }
+  }
+  Write-Host "WARN: cursor did not settle at $x,$y — landed at $($p.X),$($p.Y)"
+  return $false
+}
+
+# First click — caret at start
+Move-AndVerify ${x1} ${y1} | Out-Null
+Start-Sleep -Milliseconds 60
+[RangeOps]::mouse_event(0x0002, 0, 0, 0, 0)
+[RangeOps]::mouse_event(0x0004, 0, 0, 0, 0)
+Start-Sleep -Milliseconds 250
+
+# Shift-click — extend selection to end
+Move-AndVerify ${x2} ${y2} | Out-Null
+Start-Sleep -Milliseconds 60
+[RangeOps]::keybd_event(0x10, 0, 0, 0)
+Start-Sleep -Milliseconds 40
+[RangeOps]::mouse_event(0x0002, 0, 0, 0, 0)
+[RangeOps]::mouse_event(0x0004, 0, 0, 0, 0)
+Start-Sleep -Milliseconds 60
+[RangeOps]::keybd_event(0x10, 0, 0x0002, 0)
+`);
+  if (output) console.log(output);  // surfaces the WARN line if cursor didn't settle
+    },
+
     // --- Window management ---
     async findWindow(titlePattern) {
       const result = await runPowerShell(

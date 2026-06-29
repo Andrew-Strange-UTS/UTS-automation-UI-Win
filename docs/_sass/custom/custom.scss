@@ -1,0 +1,19 @@
+// Custom styles for the Marvin docs site.
+// just-the-docs imports custom/custom at the end of its SCSS, so anything here
+// overrides theme defaults.
+
+// Show the Marvin image to the right of the "Marvin" site title in the top-left
+// header. The url is relative to the generated CSS file
+// (assets/css/...), so it resolves to assets/images/marvin.png under any baseurl.
+.site-title.lh-tight::after {
+  content: "";
+  display: inline-block;
+  vertical-align: middle;
+  height: 1.8em;
+  width: 1.25em;
+  margin-left: 0.5em;
+  background-image: url("../images/marvin.png");
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
+}

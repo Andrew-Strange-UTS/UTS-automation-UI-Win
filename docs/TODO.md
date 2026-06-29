@@ -216,7 +216,7 @@
 - [x] AC3: The log viewer shows a thumbnail of the screenshot inline in the failed test's expanded log.
 - [x] AC4: Screenshot is taken at the moment of failure, not at the end of the sequence.
 - [x] AC5: Screenshots are saved per-run in a `failures/` subdirectory of the per-run sequence folder.
-- [ ] AC6: Failure screenshot is included in schedule export bundles. *(Interactive runs only so far; scheduler capture + bundle inclusion still TODO)*
+- [x] AC6: Failure screenshot is included in schedule export bundles.
 
 ---
 
@@ -463,11 +463,11 @@
 | Rename & Language Support | 2 | 1 (EPEA-2486) | 0 | 1 (EPEA-1916) |
 | Electron Shell & Startup | 4 | 4 (EPEA-2487, EPEA-2488, EPEA-2489, EPEA-2490) | 0 | 0 |
 | Desktop Driver | 4 | 4 (EPEA-2491, EPEA-2492, EPEA-2493, EPEA-2494) | 0 | 0 |
-| Image & OCR | 6 | 5 (EPEA-2495, EPEA-2496, EPEA-2497, EPEA-2498, EPEA-2499) | 1 (EPEA-2514) | 0 |
+| Image & OCR | 6 | 6 (EPEA-2495, EPEA-2496, EPEA-2497, EPEA-2498, EPEA-2499, EPEA-2514) | 0 | 0 |
 | Web Runner | 2 | 2 (EPEA-2500, EPEA-2501) | 0 | 0 |
 | Scheduling | 3 | 3 (EPEA-2502, EPEA-2503, EPEA-2504) | 0 | 0 |
 | Secrets Management | 2 | 2 (EPEA-2505, EPEA-2506) | 0 | 0 |
 | Reporting & Notifications | 4 | 4 (EPEA-2507, EPEA-2508, EPEA-2509, EPEA-2692) | 0 | 0 |
 | Repo & Distribution | 2 | 2 (EPEA-2510, EPEA-2511) | 0 | 0 |
 | Testing & Onboarding | 3 | 3 (EPEA-2512, EPEA-2513, EPEA-2516) | 0 | 0 |
-| **Totals** | **32** | **30** | **1** | **1** |
+| **Totals** | **32** | **31** | **0** | **1** |

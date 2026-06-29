@@ -288,6 +288,9 @@ ${chromeBinaryLine}
 ${isDesktop ? "" : `const { Builder, By, Key, until } = require('selenium-webdriver');
 const chrome = require('selenium-webdriver/chrome');`}
 const { postTestExecution } = require(${JSON.stringify(zephyrPath)});
+const fs = require('fs');
+const nodePath = require('path');
+const FAILURE_DIR = ${JSON.stringify(path.join(seqDir, "failures"))};
 const stepFns = [
 ${sequence.map((test) => {
     if (test.builtin) {
@@ -305,6 +308,23 @@ ${sequence.map((test) => `  ${JSON.stringify(test.zephyr || null)}`).join(",\n")
 const ZEPHYR_TOKEN = ${JSON.stringify(zephyrToken)};
 const EXECUTED_BY = ${JSON.stringify(schedule.executedBy || "")};
 function log(msg) { process.stdout.write(msg + "\\n"); }
+// EPEA-2514: capture a screenshot when a scheduled step fails so it can be
+// bundled into the schedule export.
+async function captureFailureScreenshot(testName) {
+  try {
+    if (!fs.existsSync(FAILURE_DIR)) fs.mkdirSync(FAILURE_DIR, { recursive: true });
+    const safe = String(testName).replace(/[^a-zA-Z0-9_-]/g, "_");
+    const file = nodePath.join(FAILURE_DIR, safe + "-" + Date.now() + ".png");
+    ${isDesktop
+      ? `await driver.screenshot(file);`
+      : `const b64 = await driver.takeScreenshot(); fs.writeFileSync(file, Buffer.from(b64, "base64"));`}
+    log("📷 Failure screenshot saved: " + file);
+    return file;
+  } catch (e) {
+    log("[failure-screenshot] could not capture: " + (e && e.message || e));
+    return null;
+  }
+}
 async function sendZephyrResult(zephyrConfig, statusName, stepResults) {
   if (!zephyrConfig || !ZEPHYR_TOKEN) return;
   try {
@@ -355,6 +375,7 @@ ${driverSetupCode}
         failedCount++;
         console.error("❌ Step #" + (i + 1) + " [" + testName + "] failed:", stepError && stepError.stack || stepError);
         zephyrLog("ERROR: " + (stepError && stepError.message || stepError), "Fail");
+        await captureFailureScreenshot(testName);
         await sendZephyrResult(zephyrConfig, "Fail", zephyrStepResults);
       }
     }
@@ -399,6 +420,20 @@ main();
   });
   child.on("close", (code) => {
     onLog(`\n=== Scheduled run finished with code ${code} ===\n`);
+    // EPEA-2514 AC6: harvest any failure screenshots into the schedule so they
+    // travel in the export bundle, then clean up the temp dir.
+    try {
+      const failureDir = path.join(seqDir, "failures");
+      const shots = {};
+      if (fs.existsSync(failureDir)) {
+        for (const f of fs.readdirSync(failureDir)) {
+          shots[f] = fs.readFileSync(path.join(failureDir, f)).toString("base64");
+        }
+      }
+      scheduleStore.update(schedule.id, { lastFailureScreenshots: shots });
+    } catch (err) {
+      console.error(`[scheduler] Could not harvest failure screenshots:`, err.message);
+    }
     onDone(code);
     // Clean up temp dir
     try { fs.rmSync(seqDir, { recursive: true, force: true }); } catch {}
@@ -552,6 +587,7 @@ function safeSchedule(s) {
     bundledSecrets: undefined,
     bundledTestCode: undefined,
     bundledImages: undefined,
+    lastFailureScreenshots: undefined,
     isRunning: isRunning(s.id),
     stepNames: s.sequencePayload?.sequence?.map((t) => t.name) || [],
     zephyrSteps: (s.sequencePayload?.sequence || [])
@@ -724,6 +760,7 @@ app.post("/api/schedules/:id/export", (req, res) => {
     bundledSecrets: schedule.bundledSecrets || {},
     bundledTestCode: schedule.bundledTestCode || {},
     bundledImages: schedule.bundledImages || {},
+    failureScreenshots: schedule.lastFailureScreenshots || {},
   };
 
   const encrypted = portableEncrypt(bundle, password);

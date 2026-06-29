@@ -261,7 +261,8 @@ async function sendNotifications(schedule, code, logs) {
     try {
       const title = `Scheduled sequence ${result}: ${schedule.name}`;
       const body = `${schedule.name} finished at ${time}\nResult: ${result}\nSteps: ${stepNames}\n\nLogs:\n${logText}`;
-      const res = await fetch(`https://ntfy.sh/${schedule.ntfyTopic}`, {
+      const ntfyBase = (schedule.ntfyServer || "https://ntfy.sh").replace(/\/+$/, "");
+      const res = await fetch(`${ntfyBase}/${schedule.ntfyTopic}`, {
         method: "POST",
         headers: {
           Title: title,
@@ -270,7 +271,7 @@ async function sendNotifications(schedule, code, logs) {
         },
         body,
       });
-      console.log(`[notify] ntfy sent to ${schedule.ntfyTopic} (HTTP ${res.status})`);
+      console.log(`[notify] ntfy sent to ${ntfyBase}/${schedule.ntfyTopic} (HTTP ${res.status})`);
     } catch (err) {
       console.error(`[notify] ntfy failed:`, err.message);
     }

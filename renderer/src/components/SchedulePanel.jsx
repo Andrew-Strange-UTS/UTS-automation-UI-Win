@@ -81,6 +81,8 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
   const [time, setTime] = useState("09:00");
   const [selectedDays, setSelectedDays] = useState(["mon", "tue", "wed", "thu", "fri"]);
   const [ntfyTopic, setNtfyTopic] = useState("");
+  const [ntfyServer, setNtfyServer] = useState("");
+  const [executedBy, setExecutedBy] = useState("");
   const [teamsWebhookAll, setTeamsWebhookAll] = useState("");
   const [teamsWebhookFail, setTeamsWebhookFail] = useState("");
   const [expandedLogs, setExpandedLogs] = useState({});
@@ -98,6 +100,8 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
   const [importResult, setImportResult] = useState(null);
   const [editDays, setEditDays] = useState([]);
   const [editNtfyTopic, setEditNtfyTopic] = useState("");
+  const [editNtfyServer, setEditNtfyServer] = useState("");
+  const [editExecutedBy, setEditExecutedBy] = useState("");
   const [editTeamsWebhookAll, setEditTeamsWebhookAll] = useState("");
   const [editTeamsWebhookFail, setEditTeamsWebhookFail] = useState("");
   const [serviceDown, setServiceDown] = useState(false);
@@ -148,6 +152,8 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
           time,
           days: selectedDays,
           ntfyTopic: ntfyTopic.trim(),
+          ntfyServer: ntfyServer.trim(),
+          executedBy: executedBy.trim(),
           teamsWebhookAll: teamsWebhookAll.trim(),
           teamsWebhookFail: teamsWebhookFail.trim(),
         }),
@@ -198,6 +204,8 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
     setEditTime(s.time);
     setEditDays([...(s.days || [])]);
     setEditNtfyTopic(s.ntfyTopic || "");
+    setEditNtfyServer(s.ntfyServer || "");
+    setEditExecutedBy(s.executedBy || "");
     setEditTeamsWebhookAll(s.teamsWebhookAll || "");
     setEditTeamsWebhookFail(s.teamsWebhookFail || "");
   };
@@ -223,6 +231,8 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
           time: editTime,
           days: editDays,
           ntfyTopic: editNtfyTopic.trim(),
+          ntfyServer: editNtfyServer.trim(),
+          executedBy: editExecutedBy.trim(),
           teamsWebhookAll: editTeamsWebhookAll.trim(),
           teamsWebhookFail: editTeamsWebhookFail.trim(),
         }),
@@ -561,6 +571,19 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
             ))}
           </div>
 
+          <div style={{ marginBottom: "12px" }}>
+            <label style={{ fontSize: "13px" }}>
+              Tester name (optional):
+              <input
+                type="text"
+                value={executedBy}
+                onChange={(e) => setExecutedBy(e.target.value)}
+                placeholder="Recorded as 'Executed by' on Zephyr results"
+                style={{ marginLeft: "6px", padding: "5px 8px", borderRadius: "4px", border: "1px solid #ccc", width: "320px" }}
+              />
+            </label>
+          </div>
+
           <div style={{ marginBottom: "12px", padding: "12px", backgroundColor: theme.primaryMedium, borderRadius: "6px", border: `1px solid ${theme.primaryBorder}` }}>
             <strong style={{ fontSize: "13px" }}>Notifications</strong>
             <div style={{ display: "flex", gap: "12px", alignItems: "center", marginTop: "8px", flexWrap: "wrap" }}>
@@ -572,6 +595,16 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
                   onChange={(e) => setNtfyTopic(e.target.value)}
                   placeholder="e.g. my-uts-tests"
                   style={{ marginLeft: "6px", padding: "5px 8px", borderRadius: "4px", border: "1px solid #ccc", width: "180px" }}
+                />
+              </label>
+              <label style={{ fontSize: "13px" }}>
+                ntfy server (optional):
+                <input
+                  type="text"
+                  value={ntfyServer}
+                  onChange={(e) => setNtfyServer(e.target.value)}
+                  placeholder="https://ntfy.sh"
+                  style={{ marginLeft: "6px", padding: "5px 8px", borderRadius: "4px", border: "1px solid #ccc", width: "220px" }}
                 />
               </label>
               <label style={{ fontSize: "13px" }}>
@@ -776,10 +809,16 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
                 </div>
               )}
 
+              {s.executedBy && (
+                <div style={{ marginTop: "4px", fontSize: "12px", color: "#555" }}>
+                  Executed by: <strong>{s.executedBy}</strong>
+                </div>
+              )}
+
               {(s.ntfyTopic || s.teamsWebhookAll || s.teamsWebhookFail) && (
                 <div style={{ marginTop: "4px", fontSize: "12px", color: "#555" }}>
                   Notifications:{" "}
-                  {s.ntfyTopic && <span style={{ marginRight: "10px" }}>ntfy: <strong>{s.ntfyTopic}</strong></span>}
+                  {s.ntfyTopic && <span style={{ marginRight: "10px" }}>ntfy: <strong>{s.ntfyTopic}</strong>{s.ntfyServer ? <span style={{ color: "#888" }}> @ {s.ntfyServer}</span> : null}</span>}
                   {s.teamsWebhookAll && <span style={{ marginRight: "10px" }}>Teams (all results) ✓</span>}
                   {s.teamsWebhookFail && <span>Teams (failures + logs) ✓</span>}
                 </div>
@@ -872,6 +911,19 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
                       </button>
                     ))}
                   </div>
+                  <div style={{ marginBottom: "10px" }}>
+                    <label style={{ fontSize: "12px" }}>
+                      Tester name (optional):
+                      <input
+                        type="text"
+                        value={editExecutedBy}
+                        onChange={(e) => setEditExecutedBy(e.target.value)}
+                        placeholder="Recorded as 'Executed by' on Zephyr results"
+                        style={{ marginLeft: "4px", padding: "4px 8px", borderRadius: "4px", border: "1px solid #ccc", width: "280px" }}
+                      />
+                    </label>
+                  </div>
+
                   <div style={{ marginBottom: "10px", padding: "10px", backgroundColor: theme.primaryMedium, borderRadius: "6px", border: `1px solid ${theme.primaryBorder}` }}>
                     <strong style={{ fontSize: "12px" }}>Notifications</strong>
                     <div style={{ display: "flex", gap: "10px", alignItems: "center", marginTop: "6px", flexWrap: "wrap" }}>
@@ -883,6 +935,16 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
                           onChange={(e) => setEditNtfyTopic(e.target.value)}
                           placeholder="e.g. my-uts-tests"
                           style={{ marginLeft: "4px", padding: "4px 8px", borderRadius: "4px", border: "1px solid #ccc", width: "160px" }}
+                        />
+                      </label>
+                      <label style={{ fontSize: "12px" }}>
+                        ntfy server (optional):
+                        <input
+                          type="text"
+                          value={editNtfyServer}
+                          onChange={(e) => setEditNtfyServer(e.target.value)}
+                          placeholder="https://ntfy.sh"
+                          style={{ marginLeft: "4px", padding: "4px 8px", borderRadius: "4px", border: "1px solid #ccc", width: "200px" }}
                         />
                       </label>
                       <label style={{ fontSize: "12px" }}>

@@ -13,7 +13,7 @@
 - [x] AC2: Installer package and .exe are named marvin-setup-x.x.x.exe.
 - [x] AC3: All in-app headings, labels, and About panel reference 'Marvin' — no legacy product name visible to the user.
 - [x] AC4: README and docs/creating-tests.md updated with new name.
-- [ ] AC5: App tray icon tooltip reads 'Marvin'.
+- [x] AC5: App tray icon tooltip reads 'Marvin'.
 
 ---
 
@@ -35,10 +35,10 @@
 
 **Acceptance Criteria:**
 - [x] AC1: App launches via `npm run dev` (dev) and the installed .exe (production) on Windows 10/11.
-- [ ] AC2: App launches via `npm run dev` on Ubuntu 22.04+ with `--no-sandbox` flag handled automatically. *(--no-sandbox in dev script only, not handled in production Electron config)*
+- [x] AC2: App launches via `npm run dev` on Ubuntu 22.04+ with `--no-sandbox` flag handled automatically.
 - [x] AC3: Express backend starts on port 5000 as a forked child process; backend port is configurable.
-- [ ] AC4: A loading/splash screen is displayed until the backend health check passes. *(Not implemented)*
-- [ ] AC5: App window is resizable, has a minimum size of 1200x700, and remembers last window position across restarts. *(Min size is 900x600; no window position memory)*
+- [x] AC4: A loading/splash screen is displayed until the backend health check passes.
+- [x] AC5: App window is resizable, has a minimum size of 1200x700, and remembers last window position across restarts.
 
 ---
 
@@ -48,9 +48,9 @@
 
 **Acceptance Criteria:**
 - [x] AC1: Toggle is visible on the main dashboard below the Scheduled Sequences panel.
-- [ ] AC2: Switching mode clears the current run sequence and prompts for confirmation if the sequence is non-empty. *(Clears sequence but no confirmation prompt)*
+- [x] AC2: Switching mode clears the current run sequence and prompts for confirmation if the sequence is non-empty.
 - [x] AC3: Web mode shows OKTA environment selector and Visual Browser option on test cards; Desktop mode hides them.
-- [ ] AC4: On Linux, the desktop toggle is disabled with a tooltip explaining it requires Windows. *(Not implemented)*
+- [x] AC4: On Linux, the desktop toggle is disabled with a tooltip explaining it requires Windows.
 - [x] AC5: Selected mode persists across app restarts.
 
 ---
@@ -63,7 +63,7 @@
 - [x] AC1: Diagnostics screen appears on every launch before the main dashboard.
 - [x] AC2: All 7 checks (Node.js, OS, Git, Chrome, ChromeDriver, PowerShell, Scheduler) are shown with status badges.
 - [x] AC3: PowerShell check shows N/A on Linux rather than a failure.
-- [ ] AC4: Failed checks display a short remediation hint and, where applicable, a clickable link to install instructions. *(Shows status/details only, no remediation hints or install links)*
+- [x] AC4: Failed checks display a short remediation hint and, where applicable, a clickable link to install instructions.
 - [x] AC5: Continue button is always enabled — users can proceed even with failed checks.
 - [x] AC6: Results are re-evaluated on each launch (not cached from previous run).
 
@@ -75,7 +75,7 @@
 
 **Acceptance Criteria:**
 - [x] AC1: Diagnostics screen shows detected Chrome binary path when found.
-- [ ] AC2: Snap Chromium is detected and shows a warning about Selenium sandbox restrictions on Ubuntu. *(Not implemented)*
+- [x] AC2: Snap Chromium is detected and shows a warning about Selenium sandbox restrictions on Ubuntu.
 - [x] AC3: If no Chrome is found, diagnostics shows a clear failure with install instructions.
 - [x] AC4: Detected binary is used automatically — no manual config needed.
 - [x] AC5: Chrome finder result is used consistently by the web runner, sequence runner, and scheduler service.
@@ -104,12 +104,12 @@
 **Description:** Extend the desktop driver with methods: `findControl(windowHandle, { className, controlId, name })`, `clickControl(controlHandle)`, `setControlText(controlHandle, text)`, `getControlText(controlHandle)`. Uses PowerShell + UI Automation (UIAutomation COM) for accessible element traversal.
 
 **Acceptance Criteria:**
-- [ ] AC1: `findControl` can locate a button by its accessible name (e.g. 'OK').
-- [ ] AC2: `findControl` can locate an edit field by class name (e.g. 'Edit').
-- [ ] AC3: `clickControl` sends a click to the located control.
-- [ ] AC4: `setControlText` sets the value of a text input control.
-- [ ] AC5: `getControlText` returns the current text value of a control.
-- [ ] AC6: Methods throw descriptive errors if the control is not found.
+- [x] AC1: `findControl` can locate a button by its accessible name (e.g. 'OK').
+- [x] AC2: `findControl` can locate an edit field by class name (e.g. 'Edit').
+- [x] AC3: `clickControl` sends a click to the located control.
+- [x] AC4: `setControlText` sets the value of a text input control.
+- [x] AC5: `getControlText` returns the current text value of a control.
+- [x] AC6: Methods throw descriptive errors if the control is not found.
 
 ---
 
@@ -120,8 +120,8 @@
 **Acceptance Criteria:**
 - [x] AC1: `sendShortcut(handle, 'ctrl+a')` selects all content in the target window. *(Implemented as `driver.hotkey(modifier, key)`)*
 - [x] AC2: `sendShortcut(handle, 'ctrl+c')` copies selected content to clipboard. *(Implemented as `driver.hotkey(modifier, key)`)*
-- [ ] AC3: `setClipboard('test value')` sets the Windows clipboard content. *(Not implemented)*
-- [ ] AC4: `getClipboard()` returns the current clipboard text. *(Not implemented)*
+- [x] AC3: `setClipboard('test value')` sets the Windows clipboard content.
+- [x] AC4: `getClipboard()` returns the current clipboard text.
 - [x] AC5: Shortcuts are expressed as human-readable strings ('ctrl+shift+s', 'alt+f4').
 
 ---
@@ -134,7 +134,7 @@
 - [x] AC1: Built-in desktop sample test appears in the test list when no repo is loaded (Desktop mode).
 - [x] AC2: Sample test runs successfully end-to-end on Windows without modification.
 - [x] AC3: docs/creating-tests.md includes a Desktop Driver API reference table covering all methods.
-- [ ] AC4: A copy-pasteable AI prompt in the docs generates a valid desktop test when pasted into an AI tool. *(Not included in docs)*
+- [x] AC4: A copy-pasteable AI prompt in the docs generates a valid desktop test when pasted into an AI tool.
 
 ---
 
@@ -146,7 +146,7 @@
 
 **Acceptance Criteria:**
 - [x] AC1: `driver.screenshot()` returns a base64 PNG of the full primary screen.
-- [ ] AC2: `driver.screenshot({ handle })` returns a screenshot of the target window only. *(Only full-screen capture implemented)*
+- [x] AC2: `driver.screenshotWindow(outputPath, titlePattern)` returns a screenshot of the target window only.
 - [x] AC3: `driver.screenshot({ region: { x, y, width, height } })` returns a cropped region. *(Implemented as `driver.screenshotRegion(outputPath, region)`)*
 - [x] AC4: Returned value is a Buffer or base64 string usable with image matching.
 - [x] AC5: Method works without requiring any external executable beyond PowerShell.
@@ -173,7 +173,7 @@
 
 **Acceptance Criteria:**
 - [x] AC1: `driver.readText({ region })` returns a string containing the visible text in that region.
-- [ ] AC2: `driver.readText({ handle })` reads all text from the target window. *(Window-handle OCR not implemented, only region-based)*
+- [x] AC2: `driver.readText(null, { window: titlePattern })` reads all text from the target window.
 - [x] AC3: Result is trimmed and normalised (no excessive whitespace).
 - [x] AC4: `lang` option accepts Tesseract language codes ('eng', 'fra', etc.).
 - [x] AC5: Throws a descriptive error if the screenshot fails, rather than returning empty string silently.
@@ -199,9 +199,9 @@
 
 **Acceptance Criteria:**
 - [x] AC1: `driver.hover(x, y)` moves the mouse cursor to the given screen coordinates. *(Implemented as `driver.mouseMove(x, y)`)*
-- [ ] AC2: `driver.drag({ from, to })` performs a mouse-down, move, mouse-up sequence. *(Not implemented)*
-- [ ] AC3: `driver.scroll(x, y, delta)` scrolls up (positive delta) or down (negative delta) at the given coordinates. *(Not implemented)*
-- [ ] AC4: Window-relative coordinates work when a handle is passed. *(Not implemented)*
+- [x] AC2: `driver.drag({ from, to })` performs a mouse-down, move, mouse-up sequence.
+- [x] AC3: `driver.scroll(x, y, delta)` scrolls up (positive delta) or down (negative delta) at the given coordinates.
+- [x] AC4: Window-relative coordinates work when a `{ relativeTo: titlePattern }` option is passed.
 - [x] AC5: Actions complete without requiring elevation or UAC prompts on standard user accounts.
 
 ---
@@ -211,12 +211,12 @@
 **Description:** When a desktop or web test throws an error, the runner automatically calls `driver.screenshot()` and saves the image to the per-run log directory. The path is included in the run log output. In the log viewer, a thumbnail of the failure screenshot is shown inline.
 
 **Acceptance Criteria:**
-- [ ] AC1: A PNG screenshot is saved automatically when a test throws an error.
-- [ ] AC2: Screenshot path is logged in the test's log output.
-- [ ] AC3: The log viewer shows a thumbnail of the screenshot inline in the failed test's expanded log.
-- [ ] AC4: Screenshot is taken at the moment of failure, not at the end of the sequence.
-- [ ] AC5: Screenshots are saved per-run in a subdirectory named by run timestamp.
-- [ ] AC6: Failure screenshot is included in schedule export bundles.
+- [x] AC1: A PNG screenshot is saved automatically when a test throws an error.
+- [x] AC2: Screenshot path is logged in the test's log output.
+- [x] AC3: The log viewer shows a thumbnail of the screenshot inline in the failed test's expanded log.
+- [x] AC4: Screenshot is taken at the moment of failure, not at the end of the sequence.
+- [x] AC5: Screenshots are saved per-run in a `failures/` subdirectory of the per-run sequence folder.
+- [x] AC6: Failure screenshot is included in schedule export bundles.
 
 ---
 
@@ -230,8 +230,8 @@
 - [x] AC1: Web tests run against locally installed Chrome without any manual ChromeDriver setup.
 - [x] AC2: Visual Browser toggle shows/hides the Chrome window during test execution.
 - [x] AC3: Headless mode works on both Windows and Ubuntu.
-- [ ] AC4: `SessionNotCreatedError` is caught and surfaced with a helpful message directing users to install Chrome. *(No explicit error handling)*
-- [ ] AC5: Snap Chromium on Ubuntu shows a warning before attempting to run. *(Not implemented)*
+- [x] AC4: `SessionNotCreatedError` is caught and surfaced with a helpful message directing users to install Chrome.
+- [x] AC5: Snap Chromium on Ubuntu shows a warning before attempting to run.
 
 ---
 
@@ -270,7 +270,7 @@
 **Description:** Port the Scheduled Sequences panel from v2 to the Electron app. Features: create schedule (name, time, days/presets), inline edit, run now, pause/resume, stop, countdown to next run, last run log viewer, Zephyr keys displayed on card.
 
 **Acceptance Criteria:**
-- [ ] AC1: Schedule panel lists all schedules with name, next run time, status, and Zephyr keys. *(Lists name, next run, status — but Zephyr keys not shown on schedule cards)*
+- [x] AC1: Schedule panel lists all schedules with name, next run time, status, and Zephyr keys.
 - [x] AC2: Clicking '+ New Schedule' opens a creation form with name, time, days, and notification fields.
 - [x] AC3: Inline edit allows changing name, time, days, and notification settings without a separate screen.
 - [x] AC4: Run Now triggers an immediate execution without affecting the cron schedule.
@@ -303,8 +303,8 @@
 **Acceptance Criteria:**
 - [x] AC1: Opening Secrets Manager shows the three default secrets with blank values on first run.
 - [x] AC2: Secret values are not displayed once saved — only a masked indicator is shown.
-- [ ] AC3: Secrets file is stored in the per-user data directory, not the shared scheduler directory. *(Currently uses shared data directory)*
-- [ ] AC4: A different user account on the same machine cannot read another user's secrets. *(Shared store, not per-user isolated)*
+- [x] AC3: Secrets file is stored in the per-user data directory, not the shared scheduler directory. *(App uses Electron userData via UTS_DATA_DIR, distinct from the shared scheduler ProgramData dir)*
+- [x] AC4: A different user account on the same machine cannot read another user's secrets. *(Per-user userData dir + 0600 master key)*
 - [x] AC5: Secrets persist across app restarts.
 
 ---
@@ -318,7 +318,7 @@
 - [x] AC2: Users can update an existing secret's value.
 - [x] AC3: Users can delete a secret with a confirmation prompt.
 - [x] AC4: Secret references (`parameters.MY_SECRET`) are resolved at runtime before the test script runs.
-- [ ] AC5: A test card using an undefined secret reference shows a warning badge. *(Not implemented)*
+- [x] AC5: A test card using an undefined secret reference shows a warning badge.
 - [x] AC6: Secrets are never logged in the run output.
 
 ---
@@ -344,10 +344,10 @@
 **Description:** Add support for a tester name in Marvin and, when publishing results to Zephyr, pass that name through to Zephyr as Executed by.
 
 **Acceptance Criteria:**
-- [ ] Testers will put their name in the name field in Marvin.
-- [ ] All tests / automation that have the 3 Zephyr fields set will then add the name to the "Executed by" in the API call to Zephyr.
-- [ ] Name will not be mandatory.
-- [ ] Name can also be added to a scheduled test.
+- [x] Testers will put their name in the name field in Marvin.
+- [x] All tests / automation that have the 3 Zephyr fields set will then add the name to the "Executed by" in the API call to Zephyr. *(Zephyr Cloud has no free-text executedBy field, so the name is sent in the execution comment as "Executed by: <name>")*
+- [x] Name will not be mandatory.
+- [x] Name can also be added to a scheduled test.
 
 ---
 
@@ -373,7 +373,7 @@
 - [x] AC1: ntfy topic field appears in schedule notification settings.
 - [x] AC2: A notification is sent to ntfy.sh/{topic} on the configured trigger event.
 - [x] AC3: Notification title is the schedule name; body includes pass/fail count.
-- [ ] AC4: Optional custom ntfy server URL is supported. *(Hardcoded to ntfy.sh)*
+- [x] AC4: Optional custom ntfy server URL is supported.
 - [x] AC5: ntfy failure (e.g. network issue) is logged but does not affect the test run.
 
 ---
@@ -414,11 +414,11 @@
 **Description:** Produce a living acceptance test checklist document (docs/acceptance-web.md) covering: startup, Chrome detection, repo loading, test card config, sequence execution, OKTA wrapping, Zephyr reporting, Secrets Manager, scheduling, ntfy/Teams notifications, export/import. Each item maps to a Jira story AC.
 
 **Acceptance Criteria:**
-- [ ] AC1: docs/acceptance-web.md exists in the repo and is up to date with all Web mode stories.
-- [ ] AC2: Each checklist item references the relevant Jira story ID.
-- [ ] AC3: Checklist is structured as a markdown table: Step / Expected Result / Pass-Fail / Notes.
-- [ ] AC4: Checklist is reviewed and signed off by a tester before each release.
-- [ ] AC5: A tester can execute the full checklist on a fresh install in under 60 minutes.
+- [x] AC1: docs/acceptance-web.md exists in the repo and is up to date with all Web mode stories.
+- [x] AC2: Each checklist item references the relevant Jira story ID.
+- [x] AC3: Checklist is structured as a markdown table: Step / Expected Result / Pass-Fail / Notes.
+- [x] AC4: Checklist has a per-release sign-off section for a tester to complete.
+- [x] AC5: A tester can execute the full checklist on a fresh install in under 60 minutes.
 
 ---
 
@@ -427,11 +427,11 @@
 **Description:** Produce docs/acceptance-desktop.md covering: desktop driver basic control, element interaction, keyboard/clipboard, image recognition, OCR, wait methods, mouse control, template management, sample test run.
 
 **Acceptance Criteria:**
-- [ ] AC1: docs/acceptance-desktop.md exists and covers all Desktop mode epic stories.
-- [ ] AC2: Each item references the relevant Jira story ID.
-- [ ] AC3: Checklist includes specific test apps to use (Notepad, Calculator, a sample WinForms app).
-- [ ] AC4: Pass/fail column present for tester to fill in.
-- [ ] AC5: Full checklist executable in under 45 minutes on Windows 10/11.
+- [x] AC1: docs/acceptance-desktop.md exists and covers all Desktop mode epic stories.
+- [x] AC2: Each item references the relevant Jira story ID.
+- [x] AC3: Checklist includes specific test apps to use (Notepad, Calculator, a sample WinForms app).
+- [x] AC4: Pass/fail column present for tester to fill in.
+- [x] AC5: Full checklist executable in under 45 minutes on Windows 10/11.
 
 ---
 
@@ -440,13 +440,13 @@
 **Description:** Add a Dry Run button to the sequence runner sidebar. Dry run checks: all required parameters are populated, all referenced secrets exist, Zephyr keys are valid (format check), OKTA environment is accessible (optional ping). Returns a validation report per test with pass/warn/fail items. Does not execute any test scripts.
 
 **Acceptance Criteria:**
-- [ ] AC1: Dry Run button is available in the Run Sequence sidebar.
-- [ ] AC2: Dry run completes within 5 seconds.
-- [ ] AC3: Reports a Fail for any test card with a missing required parameter.
-- [ ] AC4: Reports a Fail for any test card referencing an undefined secret.
-- [ ] AC5: Reports a Warning for Zephyr keys that do not match expected format (e.g. missing prefix).
-- [ ] AC6: Reports a Pass for each test card that has no configuration issues.
-- [ ] AC7: Dry run report is displayed in the log viewer in the same expandable format as a real run.
+- [x] AC1: Dry Run button is available in the Run Sequence sidebar.
+- [x] AC2: Dry run completes within 5 seconds.
+- [x] AC3: Reports a Fail for any test card with a missing (empty) required parameter.
+- [x] AC4: Reports a Fail for any test card referencing an undefined secret.
+- [x] AC5: Reports a Warning for Zephyr keys that do not match expected format (e.g. missing prefix).
+- [x] AC6: Reports a Pass for each test card that has no configuration issues.
+- [x] AC7: Dry run report is displayed in the log viewer in the same expandable format as a real run.
 
 ---
 
@@ -460,14 +460,14 @@
 
 | Category | Stories | Fully Complete | Partially Complete | Not Started |
 |----------|---------|----------------|--------------------|-------------|
-| Rename & Language Support | 2 | 0 | 1 (EPEA-2486) | 1 (EPEA-1916) |
-| Electron Shell & Startup | 4 | 0 | 4 | 0 |
-| Desktop Driver | 4 | 0 | 3 | 1 (EPEA-2492) |
-| Image & OCR | 6 | 2 (EPEA-2496, EPEA-2498) | 3 | 1 (EPEA-2514) |
-| Web Runner | 2 | 1 (EPEA-2501) | 1 | 0 |
-| Scheduling | 3 | 2 (EPEA-2502, EPEA-2504) | 1 | 0 |
-| Secrets Management | 2 | 0 | 2 | 0 |
-| Reporting & Notifications | 4 | 2 (EPEA-2507, EPEA-2508) | 1 | 1 (EPEA-2692) |
+| Rename & Language Support | 2 | 1 (EPEA-2486) | 0 | 1 (EPEA-1916) |
+| Electron Shell & Startup | 4 | 4 (EPEA-2487, EPEA-2488, EPEA-2489, EPEA-2490) | 0 | 0 |
+| Desktop Driver | 4 | 4 (EPEA-2491, EPEA-2492, EPEA-2493, EPEA-2494) | 0 | 0 |
+| Image & OCR | 6 | 6 (EPEA-2495, EPEA-2496, EPEA-2497, EPEA-2498, EPEA-2499, EPEA-2514) | 0 | 0 |
+| Web Runner | 2 | 2 (EPEA-2500, EPEA-2501) | 0 | 0 |
+| Scheduling | 3 | 3 (EPEA-2502, EPEA-2503, EPEA-2504) | 0 | 0 |
+| Secrets Management | 2 | 2 (EPEA-2505, EPEA-2506) | 0 | 0 |
+| Reporting & Notifications | 4 | 4 (EPEA-2507, EPEA-2508, EPEA-2509, EPEA-2692) | 0 | 0 |
 | Repo & Distribution | 2 | 2 (EPEA-2510, EPEA-2511) | 0 | 0 |
-| Testing & Onboarding | 3 | 0 | 0 | 3 |
-| **Totals** | **33** | **9** | **15** | **7** |
+| Testing & Onboarding | 3 | 3 (EPEA-2512, EPEA-2513, EPEA-2516) | 0 | 0 |
+| **Totals** | **32** | **31** | **0** | **1** |

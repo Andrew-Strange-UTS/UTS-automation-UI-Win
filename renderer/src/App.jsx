@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from "react";
 import TestCard from "@/components/TestCard";
 import RunSequence from "@/components/RunSequence";
 import LogGroup from "@/components/LogGroup";
+import LogContent from "@/components/LogContent";
 import SecretsPanel from "@/components/SecretsPanel";
 import PrivateRepoCheckbox from "@/components/PrivateRepoCheckbox";
 import PATPopup from "@/components/PATPopup";
@@ -46,10 +47,28 @@ export default function App() {
   const [serverSideLogs, setServerSideLogs] = useState({});
   const [isServerLogExpanded, setIsServerLogExpanded] = useState(false);
   const [secretsOpen, setSecretsOpen] = useState(false);
+  const [availableSecrets, setAvailableSecrets] = useState([]);
   const [patPopupOpen, setPatPopupOpen] = useState(false);
-  const [testType, setTestType] = useState(() =>
-    typeof window !== "undefined" ? localStorage.getItem("testType") || "desktop" : "desktop"
+  const [testerName, setTesterName] = useState(() =>
+    typeof window !== "undefined" ? localStorage.getItem("testerName") || "" : ""
   );
+  useEffect(() => {
+    if (typeof window !== "undefined") localStorage.setItem("testerName", testerName);
+  }, [testerName]);
+  const platform =
+    typeof window !== "undefined" && window.electronAPI?.platform
+      ? window.electronAPI.platform
+      : typeof navigator !== "undefined" && /Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent)
+      ? "linux"
+      : "";
+  const isLinuxPlatform = platform === "linux";
+  const [testType, setTestType] = useState(() => {
+    if (typeof window === "undefined") return "desktop";
+    const saved = localStorage.getItem("testType");
+    // Desktop tests need Windows + PowerShell; default to web on Linux.
+    if (saved) return saved;
+    return platform === "linux" ? "web" : "desktop";
+  });
   useEffect(() => {
     if (typeof window !== "undefined") {
       localStorage.setItem("testType", testType);
@@ -59,6 +78,21 @@ export default function App() {
     setTestOptions({});
   }, [testType]);
 
+  // Switch test mode, confirming first if it would discard a non-empty run sequence.
+  const handleSwitchTestType = (target) => {
+    if (target === testType) return;
+    if (target === "desktop" && isLinuxPlatform) return; // desktop unsupported on Linux
+    if (
+      runSequence.length > 0 &&
+      !confirm(
+        `Switching to ${target === "desktop" ? "Desktop" : "Web"} tests will clear your current run sequence (${runSequence.length} test${runSequence.length === 1 ? "" : "s"}). Continue?`
+      )
+    ) {
+      return;
+    }
+    setTestType(target);
+  };
+
   const [privateRepo, setPrivateRepo] = useState(() =>
     typeof window !== "undefined" ? localStorage.getItem("privateRepo") === "true" : false
   );
@@ -67,6 +101,22 @@ export default function App() {
       localStorage.setItem("privateRepo", privateRepo ? "true" : "false");
     }
   }, [privateRepo]);
+
+  // Keep the list of available secret names current so test cards can flag
+  // references to secrets that don't exist. Refreshes when the Secrets panel closes.
+  const loadAvailableSecrets = async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/secrets`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      setAvailableSecrets(data.secrets || []);
+    } catch {
+      // ignore — badge simply won't show without the list
+    }
+  };
+  useEffect(() => {
+    if (!secretsOpen) loadAvailableSecrets();
+  }, [secretsOpen]);
   // WebSocket single test runner
   const handleRunTestViaWebSocket = (testName, options = {}, onDone) => {
     const startTime = new Date().toLocaleString();
@@ -291,6 +341,15 @@ export default function App() {
     currentStepRef.current = null;
     setServerSideLogs({});
     setTestResults({});
+  };
+  // Dry run (EPEA-2516): display the validation report in the same log viewer.
+  const handleDryRunReport = (logsByKey, resultsByTest) => {
+    logsAccumulatorRef.current = { ...logsByKey };
+    sequenceBufferRef.current = "";
+    currentStepRef.current = null;
+    setServerSideLogs({ ...logsByKey });
+    setTestResults(resultsByTest || {});
+    setIsServerLogExpanded(true);
   };
   const hiddenTests = [
     "OKTA-Prod-Login",
@@ -649,18 +708,9 @@ export default function App() {
                 <LogGroup
                   key={name}
                   title={name}
-                  defaultCollapsed={name !== "[SEQUENCE]"}
+                  defaultCollapsed={name !== "[SEQUENCE]" && name !== "[DRY RUN]"}
                 >
-                  <pre
-                    style={{
-                      margin: 0,
-                      padding: 15,
-                      whiteSpace: "pre-wrap",
-                      fontSize: "13px",
-                    }}
-                  >
-                    {log || "No logs yet."}
-                  </pre>
+                  <LogContent log={log} />
                 </LogGroup>
               ))}
             </div>
@@ -722,13 +772,16 @@ export default function App() {
             border: `2px solid ${theme.primary}`,
           }}>
             <button
-              onClick={() => setTestType("desktop")}
+              onClick={() => handleSwitchTestType("desktop")}
+              disabled={isLinuxPlatform}
+              title={isLinuxPlatform ? "Desktop tests require Windows + PowerShell and are not available on Linux." : ""}
               style={{
                 padding: "10px 24px",
                 fontSize: "15px",
                 fontWeight: "bold",
                 border: "none",
-                cursor: "pointer",
+                cursor: isLinuxPlatform ? "not-allowed" : "pointer",
+                opacity: isLinuxPlatform ? 0.5 : 1,
                 backgroundColor: testType === "desktop" ? theme.primary : "#fff",
                 color: testType === "desktop" ? theme.primaryText : theme.primary,
               }}
@@ -736,7 +789,7 @@ export default function App() {
               Desktop Tests
             </button>
             <button
-              onClick={() => setTestType("web")}
+              onClick={() => handleSwitchTestType("web")}
               style={{
                 padding: "10px 24px",
                 fontSize: "15px",
@@ -750,6 +803,24 @@ export default function App() {
             >
               Web Tests
             </button>
+          </div>
+          {isLinuxPlatform && (
+            <div style={{ marginTop: "8px", fontSize: "12px", color: "#888" }}>
+              Desktop tests require Windows + PowerShell and are disabled on Linux.
+            </div>
+          )}
+          <div style={{ marginTop: "12px" }}>
+            <label style={{ fontSize: "13px", color: theme.primary, fontWeight: "bold" }}>
+              Tester name (optional):{" "}
+              <input
+                type="text"
+                value={testerName}
+                onChange={(e) => setTesterName(e.target.value)}
+                placeholder="e.g. Jane Smith"
+                title="Recorded as 'Executed by' on Zephyr results"
+                style={{ padding: "6px 10px", fontSize: "13px", borderRadius: "4px", border: "1px solid #ccc", width: "200px", fontWeight: "normal" }}
+              />
+            </label>
           </div>
         </div>
         {/* Test cards */}
@@ -787,6 +858,7 @@ export default function App() {
                   onOptionsChange={handleOptionsChange}
                   results={testResults["__default-desktop-test"]}
                   testType={testType}
+                  availableSecrets={availableSecrets}
                 />
                 <TestCard
                   key="__default-desktop-showcase"
@@ -801,6 +873,7 @@ export default function App() {
                   onOptionsChange={handleOptionsChange}
                   results={testResults["__default-desktop-showcase"]}
                   testType={testType}
+                  availableSecrets={availableSecrets}
                 />
               </>
             ) : (
@@ -817,6 +890,7 @@ export default function App() {
                 onOptionsChange={handleOptionsChange}
                 results={testResults["__default-test"]}
                 testType={testType}
+                availableSecrets={availableSecrets}
               />
             )}
           </>
@@ -833,6 +907,7 @@ export default function App() {
               onOptionsChange={handleOptionsChange}
               results={testResults[name]}
               testType={testType}
+              availableSecrets={availableSecrets}
             />
           ))
         )}
@@ -844,11 +919,14 @@ export default function App() {
           ...(testOptions[t.name] || {}),
         }))}
         testType={testType}
+        executedBy={testerName}
+        availableSecrets={availableSecrets}
         onTestResult={(name, options, onDone) =>
           handleRunTestViaWebSocket(name, testOptions[name], onDone)
         }
         onSequenceLog={handleSequenceLog}
         onBeforeRun={handleClearAllLogs}
+        onDryRunReport={handleDryRunReport}
       />
     </div>
   );

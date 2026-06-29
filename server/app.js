@@ -33,6 +33,7 @@ const sequenceRoutes = require("./routes/sequence");
 const secretsRoutes = require("./routes/secrets");
 const schedulesRoutes = require("./routes/schedules");
 const healthRoutes = require("./routes/health");
+const screenshotRoutes = require("./routes/screenshot");
 
 app.use("/api/git", gitRoutes);
 app.use("/api/stream", streamRoutes);
@@ -41,6 +42,7 @@ app.use("/api/sequence", sequenceRoutes);
 app.use("/api/secrets", secretsRoutes);
 app.use("/api/schedules", schedulesRoutes);
 app.use("/api/health", healthRoutes);
+app.use("/api/screenshot", screenshotRoutes);
 
 // Schedules are now managed by the standalone scheduler service
 // (server/scheduler-service.js) — the routes proxy to it.

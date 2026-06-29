@@ -1,0 +1,23 @@
+title: Marvin
+description: Desktop and Web Test Automation
+remote_theme: just-the-docs/just-the-docs
+
+# Project site served from the /docs folder of this repo.
+url: https://andrew-strange-uts.github.io
+baseurl: /UTS-automation-UI-Win
+
+plugins:
+  - jekyll-remote-theme
+
+# Search across the docs
+search_enabled: true
+
+# Internal planning files that should not be published to the public site.
+exclude:
+  - TODO.md
+  - Gemfile
+  - Gemfile.lock
+
+aux_links:
+  "View on GitHub":
+    - "https://github.com/Andrew-Strange-UTS/UTS-automation-UI-Win"

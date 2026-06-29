@@ -288,6 +288,9 @@ ${chromeBinaryLine}
 ${isDesktop ? "" : `const { Builder, By, Key, until } = require('selenium-webdriver');
 const chrome = require('selenium-webdriver/chrome');`}
 const { postTestExecution } = require(${JSON.stringify(zephyrPath)});
+const fs = require('fs');
+const nodePath = require('path');
+const FAILURE_DIR = ${JSON.stringify(path.join(seqDir, "failures"))};
 const stepFns = [
 ${sequence.map((test) => {
     if (test.builtin) {
@@ -303,7 +306,25 @@ const stepZephyrConfigs = [
 ${sequence.map((test) => `  ${JSON.stringify(test.zephyr || null)}`).join(",\n")}
 ];
 const ZEPHYR_TOKEN = ${JSON.stringify(zephyrToken)};
+const EXECUTED_BY = ${JSON.stringify(schedule.executedBy || "")};
 function log(msg) { process.stdout.write(msg + "\\n"); }
+// EPEA-2514: capture a screenshot when a scheduled step fails so it can be
+// bundled into the schedule export.
+async function captureFailureScreenshot(testName) {
+  try {
+    if (!fs.existsSync(FAILURE_DIR)) fs.mkdirSync(FAILURE_DIR, { recursive: true });
+    const safe = String(testName).replace(/[^a-zA-Z0-9_-]/g, "_");
+    const file = nodePath.join(FAILURE_DIR, safe + "-" + Date.now() + ".png");
+    ${isDesktop
+      ? `await driver.screenshot(file);`
+      : `const b64 = await driver.takeScreenshot(); fs.writeFileSync(file, Buffer.from(b64, "base64"));`}
+    log("📷 Failure screenshot saved: " + file);
+    return file;
+  } catch (e) {
+    log("[failure-screenshot] could not capture: " + (e && e.message || e));
+    return null;
+  }
+}
 async function sendZephyrResult(zephyrConfig, statusName, stepResults) {
   if (!zephyrConfig || !ZEPHYR_TOKEN) return;
   try {
@@ -312,6 +333,7 @@ async function sendZephyrResult(zephyrConfig, statusName, stepResults) {
       testCaseKey: zephyrConfig.caseKey,
       testCycleKey: zephyrConfig.cycleKey,
       statusName,
+      executedBy: EXECUTED_BY || undefined,
       testScriptResults: stepResults.length > 0 ? stepResults : undefined,
     });
     log("Zephyr: Reported " + statusName + " for " + zephyrConfig.caseKey + " (HTTP " + result.statusCode + ")");
@@ -353,6 +375,7 @@ ${driverSetupCode}
         failedCount++;
         console.error("❌ Step #" + (i + 1) + " [" + testName + "] failed:", stepError && stepError.stack || stepError);
         zephyrLog("ERROR: " + (stepError && stepError.message || stepError), "Fail");
+        await captureFailureScreenshot(testName);
         await sendZephyrResult(zephyrConfig, "Fail", zephyrStepResults);
       }
     }
@@ -397,6 +420,20 @@ main();
   });
   child.on("close", (code) => {
     onLog(`\n=== Scheduled run finished with code ${code} ===\n`);
+    // EPEA-2514 AC6: harvest any failure screenshots into the schedule so they
+    // travel in the export bundle, then clean up the temp dir.
+    try {
+      const failureDir = path.join(seqDir, "failures");
+      const shots = {};
+      if (fs.existsSync(failureDir)) {
+        for (const f of fs.readdirSync(failureDir)) {
+          shots[f] = fs.readFileSync(path.join(failureDir, f)).toString("base64");
+        }
+      }
+      scheduleStore.update(schedule.id, { lastFailureScreenshots: shots });
+    } catch (err) {
+      console.error(`[scheduler] Could not harvest failure screenshots:`, err.message);
+    }
     onDone(code);
     // Clean up temp dir
     try { fs.rmSync(seqDir, { recursive: true, force: true }); } catch {}
@@ -419,12 +456,13 @@ async function sendNotifications(schedule, code, logs) {
     try {
       const title = `Scheduled sequence ${result}: ${schedule.name}`;
       const body = `${schedule.name} finished at ${time}\nResult: ${result}\nSteps: ${stepNames}\n\nLogs:\n${logText}`;
-      const res = await fetch(`https://ntfy.sh/${schedule.ntfyTopic}`, {
+      const ntfyBase = (schedule.ntfyServer || "https://ntfy.sh").replace(/\/+$/, "");
+      const res = await fetch(`${ntfyBase}/${schedule.ntfyTopic}`, {
         method: "POST",
         headers: { Title: title, Priority: code === 0 ? "default" : "high", Tags: code === 0 ? "white_check_mark" : "x" },
         body,
       });
-      console.log(`[notify] ntfy sent to ${schedule.ntfyTopic} (HTTP ${res.status})`);
+      console.log(`[notify] ntfy sent to ${ntfyBase}/${schedule.ntfyTopic} (HTTP ${res.status})`);
     } catch (err) {
       console.error(`[notify] ntfy failed:`, err.message);
     }
@@ -549,6 +587,7 @@ function safeSchedule(s) {
     bundledSecrets: undefined,
     bundledTestCode: undefined,
     bundledImages: undefined,
+    lastFailureScreenshots: undefined,
     isRunning: isRunning(s.id),
     stepNames: s.sequencePayload?.sequence?.map((t) => t.name) || [],
     zephyrSteps: (s.sequencePayload?.sequence || [])
@@ -587,8 +626,8 @@ app.get("/api/schedules/:id/logs", (req, res) => {
 
 // Create schedule
 app.post("/api/schedules", (req, res) => {
-  const { name, sequencePayload, time, days, ntfyTopic, teamsWebhookAll, teamsWebhookFail,
-          bundledSecrets: reqSecrets, bundledTestCode: reqCode, bundledImages: reqImages } = req.body;
+  const { name, sequencePayload, time, days, ntfyTopic, ntfyServer, teamsWebhookAll, teamsWebhookFail,
+          executedBy, bundledSecrets: reqSecrets, bundledTestCode: reqCode, bundledImages: reqImages } = req.body;
 
   if (!name || !sequencePayload || !time || !days || !Array.isArray(days) || days.length === 0) {
     return res.status(400).json({ error: "Required: name, sequencePayload, time (HH:MM), days (array)" });
@@ -613,8 +652,10 @@ app.post("/api/schedules", (req, res) => {
     time,
     days: days.map((d) => d.toLowerCase()),
     ntfyTopic: ntfyTopic || "",
+    ntfyServer: ntfyServer || "",
     teamsWebhookAll: teamsWebhookAll || "",
     teamsWebhookFail: teamsWebhookFail || "",
+    executedBy: executedBy || "",
     status: "active",
     createdAt: new Date().toISOString(),
     lastRun: null,
@@ -631,10 +672,12 @@ app.patch("/api/schedules/:id", (req, res) => {
   const schedule = scheduleStore.getById(req.params.id);
   if (!schedule) return res.status(404).json({ error: "Schedule not found" });
 
-  const { name, time, days, ntfyTopic, teamsWebhookAll, teamsWebhookFail } = req.body;
+  const { name, time, days, ntfyTopic, ntfyServer, teamsWebhookAll, teamsWebhookFail, executedBy } = req.body;
   const updates = {};
   if (name) updates.name = name;
   if (ntfyTopic !== undefined) updates.ntfyTopic = ntfyTopic;
+  if (ntfyServer !== undefined) updates.ntfyServer = ntfyServer;
+  if (executedBy !== undefined) updates.executedBy = executedBy;
   if (teamsWebhookAll !== undefined) updates.teamsWebhookAll = teamsWebhookAll;
   if (teamsWebhookFail !== undefined) updates.teamsWebhookFail = teamsWebhookFail;
   if (time) {
@@ -710,12 +753,14 @@ app.post("/api/schedules/:id/export", (req, res) => {
     exportedAt: new Date().toISOString(),
     schedule: {
       name: schedule.name, time: schedule.time, days: schedule.days,
-      ntfyTopic: schedule.ntfyTopic, teamsWebhookAll: schedule.teamsWebhookAll, teamsWebhookFail: schedule.teamsWebhookFail,
+      ntfyTopic: schedule.ntfyTopic, ntfyServer: schedule.ntfyServer, teamsWebhookAll: schedule.teamsWebhookAll, teamsWebhookFail: schedule.teamsWebhookFail,
+      executedBy: schedule.executedBy,
     },
     sequencePayload: schedule.sequencePayload,
     bundledSecrets: schedule.bundledSecrets || {},
     bundledTestCode: schedule.bundledTestCode || {},
     bundledImages: schedule.bundledImages || {},
+    failureScreenshots: schedule.lastFailureScreenshots || {},
   };
 
   const encrypted = portableEncrypt(bundle, password);
@@ -790,8 +835,10 @@ app.post("/api/schedules/import", (req, res) => {
     time: bundle.schedule.time,
     days: bundle.schedule.days,
     ntfyTopic: bundle.schedule.ntfyTopic || "",
+    ntfyServer: bundle.schedule.ntfyServer || "",
     teamsWebhookAll: bundle.schedule.teamsWebhookAll || "",
     teamsWebhookFail: bundle.schedule.teamsWebhookFail || "",
+    executedBy: bundle.schedule.executedBy || "",
     status: "active",
     createdAt: new Date().toISOString(),
     lastRun: null,

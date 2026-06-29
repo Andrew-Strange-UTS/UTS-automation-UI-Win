@@ -204,11 +204,13 @@ module.exports = async function (driver, parameters = {}, zephyrLog) {
 | `driver.type(text)` | Type text into the focused window using SendKeys |
 | `driver.keyPress(...keys)` | Press key(s). Supports: `Enter`, `Tab`, `Escape`, `Backspace`, `Delete`, `Up`, `Down`, `Left`, `Right`, `Home`, `End`, `F1`-`F12` |
 | `driver.hotkey(modifier, key)` | Shortcut for combos like `hotkey("Ctrl", "a")` |
-| `driver.mouseMove(x, y)` | Move cursor to screen coordinates |
-| `driver.mouseClick(x, y, button?)` | Click at coordinates. `button` is `"left"` (default) or `"right"` |
+| `driver.mouseMove(x, y, options?)` | Move cursor to screen coordinates. Pass `{ relativeTo: "Window Title" }` to treat `x`/`y` as offsets from that window's top-left corner |
+| `driver.mouseClick(x, y, button?, options?)` | Click at coordinates. `button` is `"left"` (default) or `"right"`. Pass `{ relativeTo: "Window Title" }` to use window-relative coordinates |
 | `driver.doubleClick(x, y)` | Double-click at coordinates — selects the word under the cursor in most apps |
 | `driver.tripleClick(x, y)` | Triple-click at coordinates — selects the whole line/paragraph in most apps |
 | `driver.shiftClick(x, y, button?)` | Click while holding Shift. Combine with a prior `mouseClick` to range-select text from the first click point to here |
+| `driver.drag({ from, to }, options?)` | Click-and-drag: press the left button at `from = { x, y }`, move to `to = { x, y }`, release. Pass `{ relativeTo: "Window Title" }` for window-relative coordinates |
+| `driver.scroll(x, y, delta, options?)` | Scroll the mouse wheel at `(x, y)`. `delta` is a small integer (positive scrolls up, negative down). Pass `{ relativeTo: "Window Title" }` for window-relative coordinates |
 | `driver.findWindow(titlePattern)` | Find a window by partial title match, returns window handle |
 | `driver.focusWindow(titlePattern)` | Bring a window to the foreground by partial title match |
 | `driver.maximizeWindow(titlePattern?)` | Maximise a window matched by title (substring), or the current foreground window if no pattern is given |
@@ -220,11 +222,16 @@ module.exports = async function (driver, parameters = {}, zephyrLog) {
 | `driver.getClipboard()` | Return the current Windows clipboard text |
 | `driver.screenshot(outputPath)` | Take a screenshot and save to the given path |
 | `driver.screenshotRegion(outputPath, region)` | Save a cropped region — `region = { x, y, width, height }` |
-| `driver.readText(region?, options?)` | OCR the screen (or a region) using Tesseract. Returns `{ text, confidence, words: [{ text, confidence, bbox: { x0, y0, x1, y1 } }] }` |
+| `driver.screenshotWindow(outputPath, titlePattern)` | Capture only the bounds of the window whose title contains `titlePattern`. Throws if the window is not found |
+| `driver.readText(region?, options?)` | OCR the screen (or a region) using Tesseract. Returns `{ text, confidence, words: [{ text, confidence, bbox: { x0, y0, x1, y1 } }] }`. Pass `options.window = "Window Title"` (with no `region`) to OCR just that window |
 | `driver.findImage(refImage, options?)` | Find a reference image on screen. Returns `{ found, confidence, centerX, centerY, ... }` |
 | `driver.clickImage(refImage, options?)` | Find image and click its centre |
 | `driver.waitForImage(refImage, options?)` | Poll until image appears or timeout |
 | `driver.waitForText(text, region?, options?)` | Poll until OCR finds the text or timeout |
+| `driver.findControl(windowTitle, locator?)` | Find a UI Automation control under a window (or the desktop if `windowTitle` is `null`). `locator = { name?, className?, controlId? }`. Returns `{ found, name, className, automationId }`; throws if not found |
+| `driver.clickControl(windowTitle, locator)` | Find a control by `locator` and invoke it (falls back to clicking its clickable point). Throws if not found |
+| `driver.setControlText(windowTitle, locator, text)` | Set a control's value via the ValuePattern. Throws if not found |
+| `driver.getControlText(windowTitle, locator)` | Read a control's value (falls back to its Name). Throws if not found |
 | `driver.quit()` | No-op (desktop driver has no persistent session) |
 
 **Modifier keys for `keyPress`:** `"Ctrl"` / `"Control"`, `"Alt"`, `"Shift"`, `"Win"` / `"Meta"`
@@ -563,12 +570,18 @@ FOR DESKTOP TESTS (Windows only):
     Keys: "Enter", "Tab", "Escape", "Backspace", "Delete", "Up", "Down", "Left",
     "Right", "Home", "End", "F1"-"F12"
   - driver.hotkey(modifier, key) — shortcut for key combos like hotkey("Ctrl", "a")
-  - driver.mouseMove(x, y) — move cursor to screen coordinates
-  - driver.mouseClick(x, y, button?) — click at coordinates ("left" default, or "right")
+  - driver.mouseMove(x, y, options?) — move cursor to screen coordinates
+  - driver.mouseClick(x, y, button?, options?) — click at coordinates ("left" default, or "right")
   - driver.doubleClick(x, y) — double-click at coordinates (selects a word in most apps)
   - driver.tripleClick(x, y) — triple-click (selects a line/paragraph in most apps)
   - driver.shiftClick(x, y, button?) — click holding Shift; combine with a prior
     mouseClick to range-select text from the first point to here
+  - driver.drag({ from, to }, options?) — click-and-drag from {x,y} to {x,y}
+  - driver.scroll(x, y, delta, options?) — scroll the wheel at (x,y); delta is a
+    small int (positive up, negative down)
+  - Window-relative coordinates: pass { relativeTo: "Window Title" } as the
+    options arg on mouseMove, mouseClick, drag, and scroll to treat x/y as
+    offsets from that window's top-left corner
 
   Window management:
   - driver.findWindow(titlePattern) — find window by partial title, returns handle
@@ -586,10 +599,20 @@ FOR DESKTOP TESTS (Windows only):
   Utilities:
   - driver.pause(ms) — wait ms milliseconds
   - driver.screenshot(outputPath) — take a screenshot
+  - driver.screenshotWindow(outputPath, titlePattern) — screenshot just the
+    window whose title contains titlePattern
+
+  UI Automation controls (target controls by Name/ClassName/AutomationId):
+  - driver.findControl(windowTitle, { name?, className?, controlId? }) — find a
+    control under a window (or the desktop if windowTitle is null); throws if not found
+  - driver.clickControl(windowTitle, locator) — invoke/click a control
+  - driver.setControlText(windowTitle, locator, text) — set a control's value
+  - driver.getControlText(windowTitle, locator) — read a control's value
 
   Image OCR & Recognition (put reference images in tests/YourTest/images/):
   - driver.readText(region?, options?) — OCR: screenshot the screen (or a region
-    {x,y,width,height}), returns { text, confidence, words }
+    {x,y,width,height}), returns { text, confidence, words }. Pass
+    options.window = "Window Title" (with no region) to OCR just that window
   - driver.findImage("button.png", options?) — find a reference image on screen,
     returns { found, x, y, centerX, centerY, confidence }
   - driver.waitForImage("dialog.png", options?) — poll until image appears (timeout default 10s)

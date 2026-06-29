@@ -7,9 +7,12 @@ import theme from "@/theme";
 export default function RunSequence({
   sequence,
   testType = "desktop",
+  executedBy = "",
+  availableSecrets = [],
   onTestResult,
   onSequenceLog,
   onBeforeRun,
+  onDryRunReport,
 }) {
   const [isRunning, setIsRunning] = useState(false);
 
@@ -58,6 +61,79 @@ export default function RunSequence({
 
   const wrappedSequence = buildWrappedSequence();
 
+  // Dry run (EPEA-2516): validate each test card without executing anything.
+  // Checks: filled parameters, referenced secrets exist, Zephyr key formats.
+  const SECRET_REF_RE = /\$\{\{\s*secrets\.([A-Za-z0-9_]+)\s*\}\}/g;
+  const ZEPHYR_FORMATS = {
+    projectKey: /^[A-Z][A-Z0-9]+$/,
+    caseKey: /^[A-Z][A-Z0-9]+-T\d+$/,
+    cycleKey: /^[A-Z][A-Z0-9]+-R\d+$/,
+  };
+  const handleDryRun = () => {
+    const logsByKey = {};
+    const resultsByTest = {};
+    let pass = 0, warn = 0, fail = 0;
+
+    for (const test of wrappedSequence) {
+      if (test.builtin) continue; // skip injected OKTA/builtin steps
+      const items = [];
+      const params = test.parameters || {};
+
+      // Parameters
+      const emptyParams = Object.keys(params).filter((k) => String(params[k] ?? "").trim() === "");
+      if (emptyParams.length > 0) {
+        items.push({ level: "FAIL", msg: `Empty required parameter(s): ${emptyParams.join(", ")}` });
+      } else if (Object.keys(params).length > 0) {
+        items.push({ level: "PASS", msg: `All ${Object.keys(params).length} parameter(s) populated` });
+      }
+
+      // Secret references
+      const refs = new Set();
+      for (const v of Object.values(params)) {
+        if (typeof v !== "string") continue;
+        let m;
+        SECRET_REF_RE.lastIndex = 0;
+        while ((m = SECRET_REF_RE.exec(v)) !== null) refs.add(m[1]);
+      }
+      const missing = [...refs].filter((s) => !availableSecrets.includes(s));
+      if (missing.length > 0) {
+        items.push({ level: "FAIL", msg: `References undefined secret(s): ${missing.join(", ")}` });
+      } else if (refs.size > 0) {
+        items.push({ level: "PASS", msg: `Referenced secret(s) exist: ${[...refs].join(", ")}` });
+      }
+
+      // Zephyr key formats
+      if (test.zephyr) {
+        for (const field of ["projectKey", "caseKey", "cycleKey"]) {
+          const val = test.zephyr[field];
+          if (val && !ZEPHYR_FORMATS[field].test(val)) {
+            items.push({ level: "WARN", msg: `Zephyr ${field} "${val}" does not match expected format` });
+          }
+        }
+        items.push({ level: "PASS", msg: `Zephyr keys present (${test.zephyr.caseKey || "?"})` });
+      }
+
+      if (items.length === 0) items.push({ level: "PASS", msg: "No configuration to validate" });
+
+      const hasFail = items.some((i) => i.level === "FAIL");
+      const hasWarn = items.some((i) => i.level === "WARN");
+      const status = hasFail ? "❌ Dry run: fail" : hasWarn ? "⚠️ Dry run: warning" : "✅ Dry run: pass";
+      if (hasFail) fail++; else if (hasWarn) warn++; else pass++;
+
+      logsByKey[test.name] =
+        `Dry run validation for "${test.name}"\n` +
+        items.map((i) => `  [${i.level}] ${i.msg}`).join("\n") + "\n";
+      resultsByTest[test.name] = { status, time: new Date().toLocaleString() };
+    }
+
+    logsByKey["[DRY RUN]"] =
+      `Dry run complete (no tests executed).\n` +
+      `Tests checked: ${pass + warn + fail}\n` +
+      `  ✅ Pass: ${pass}\n  ⚠️ Warning: ${warn}\n  ❌ Fail: ${fail}\n`;
+
+    if (onDryRunReport) onDryRunReport(logsByKey, resultsByTest);
+  };
+
   // Sequence runner
   const handleRun = async () => {
     if (onBeforeRun) onBeforeRun(); // <== Clear logs BEFORE anything starts!!
@@ -86,6 +162,7 @@ export default function RunSequence({
         sequence: simpleSeq,
         parameters: allParameters,
         testType,
+        executedBy,
       }),
     });
     if (!response.ok) {
@@ -180,6 +257,28 @@ export default function RunSequence({
           }}
         >
           {isRunning ? "Running..." : "▶ Run Sequence"}
+        </button>
+      )}
+      {wrappedSequence.length > 0 && (
+        <button
+          onClick={handleDryRun}
+          disabled={isRunning}
+          title="Validate parameters, secrets and Zephyr keys without running any test"
+          style={{
+            marginTop: "10px",
+            padding: "9px 15px",
+            background: "#fff",
+            color: theme.primary,
+            border: `2px solid ${theme.primary}`,
+            borderRadius: "5px",
+            width: "100%",
+            fontSize: "14px",
+            fontWeight: "bold",
+            cursor: isRunning ? "not-allowed" : "pointer",
+            opacity: isRunning ? 0.6 : 1,
+          }}
+        >
+          🧪 Dry Run (validate only)
         </button>
       )}
     </div>

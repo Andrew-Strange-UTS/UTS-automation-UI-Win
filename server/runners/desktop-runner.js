@@ -45,6 +45,101 @@ function createDesktopDriver(options = {}) {
     return tmpFile;
   }
 
+  // Double single quotes so a value can be embedded safely inside a
+  // PowerShell single-quoted string literal.
+  function psEscape(value) {
+    return String(value).replace(/'/g, "''");
+  }
+
+  // Resolve a window's bounding rectangle (screen coordinates) by partial
+  // MainWindowTitle match, via the Win32 GetWindowRect P/Invoke. Returns
+  // { x, y, width, height }. Throws if the window is not found.
+  async function getWindowRect(titlePattern) {
+    const escaped = psEscape(titlePattern);
+    const result = await runPowerShell(`
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class WinRectOps {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+}
+"@
+$proc = Get-Process | Where-Object {$_.MainWindowTitle -like '*${escaped}*'} | Select-Object -First 1;
+if ($null -eq $proc) { throw "Window matching '${escaped}' not found" }
+$rect = New-Object WinRectOps+RECT;
+[WinRectOps]::GetWindowRect($proc.MainWindowHandle, [ref]$rect) | Out-Null;
+Write-Output ("{0},{1},{2},{3}" -f $rect.Left, $rect.Top, ($rect.Right - $rect.Left), ($rect.Bottom - $rect.Top))
+`);
+    const parts = String(result).trim().split(",").map((n) => parseInt(n, 10));
+    if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) {
+      throw new Error(`Could not determine window rectangle for "${titlePattern}"`);
+    }
+    return { x: parts[0], y: parts[1], width: parts[2], height: parts[3] };
+  }
+
+  // Build a UIAutomation PowerShell script that resolves a root element (a
+  // window matched by partial title, or the whole desktop if no title) then
+  // FindFirst's a control via the supplied locator. The actionLines snippet
+  // runs with $element bound to the located AutomationElement. The locator can
+  // match on Name, ClassName, and/or AutomationId. Because live COM handles
+  // cannot cross the PowerShell process boundary, callers re-find the element
+  // inside each invocation by passing the same locator.
+  function buildControlScript(windowTitle, locator = {}, actionLines = "") {
+    const conds = [];
+    if (locator.name != null) {
+      conds.push(`New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, '${psEscape(locator.name)}')`);
+    }
+    if (locator.className != null) {
+      conds.push(`New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, '${psEscape(locator.className)}')`);
+    }
+    if (locator.controlId != null) {
+      conds.push(`New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty, '${psEscape(locator.controlId)}')`);
+    }
+    if (conds.length === 0) {
+      throw new Error("Control locator must specify at least one of: name, className, controlId");
+    }
+    const condExpr = conds.length === 1
+      ? `$cond = ${conds[0]};`
+      : `$cond = New-Object System.Windows.Automation.AndCondition(@(${conds.join(", ")}));`;
+
+    let rootResolve;
+    if (windowTitle) {
+      const wt = psEscape(windowTitle);
+      rootResolve = `
+$desktop = [System.Windows.Automation.AutomationElement]::RootElement;
+$winCond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Window);
+$wins = $desktop.FindAll([System.Windows.Automation.TreeScope]::Children, $winCond);
+$root = $null;
+foreach ($w in $wins) { if ($w.Current.Name -like '*${wt}*') { $root = $w; break } }
+if ($null -eq $root) { throw "Window matching '${wt}' not found" }`;
+    } else {
+      rootResolve = `$root = [System.Windows.Automation.AutomationElement]::RootElement;`;
+    }
+
+    return `
+Add-Type -AssemblyName UIAutomationClient;
+Add-Type -AssemblyName UIAutomationTypes;
+${rootResolve}
+${condExpr}
+$element = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond);
+if ($null -eq $element) { throw "Control not found" }
+${actionLines}
+`;
+  }
+
+  // Run a UIAutomation control action, re-throwing PowerShell failures as a
+  // descriptive JS error that names the window and locator.
+  async function runControlAction(windowTitle, locator, actionLines, verb) {
+    const script = buildControlScript(windowTitle, locator, actionLines);
+    try {
+      return await runPowerShell(script);
+    } catch (err) {
+      throw new Error(`Control ${verb} failed: control not found or not actionable (window: "${windowTitle || "foreground"}", locator: ${JSON.stringify(locator)}): ${err.message}`);
+    }
+  }
+
   const driver = {
     // --- Keyboard ---
     async type(text) {
@@ -96,13 +191,27 @@ function createDesktopDriver(options = {}) {
     },
 
     // --- Mouse ---
-    async mouseMove(x, y) {
+    // Move the cursor. When options.relativeTo (a window title pattern) is
+    // given, x/y are treated as offsets from that window's top-left corner.
+    async mouseMove(x, y, options = {}) {
+      if (options.relativeTo) {
+        const rect = await getWindowRect(options.relativeTo);
+        x += rect.x;
+        y += rect.y;
+      }
       await runPowerShell(
         `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${x}, ${y})`
       );
     },
 
-    async mouseClick(x, y, button = "left") {
+    // Click at coordinates. When options.relativeTo (a window title pattern) is
+    // given, x/y are offsets from that window's top-left corner.
+    async mouseClick(x, y, button = "left", options = {}) {
+      if (options.relativeTo) {
+        const rect = await getWindowRect(options.relativeTo);
+        x += rect.x;
+        y += rect.y;
+      }
       const btnDown = button === "right" ? "0x0008" : "0x0002";
       const btnUp = button === "right" ? "0x0010" : "0x0004";
       await runPowerShell(`
@@ -158,6 +267,69 @@ Start-Sleep -Milliseconds 50;
 [ShiftClickOps]::mouse_event(${btnUp}, 0, 0, 0, 0);
 Start-Sleep -Milliseconds 50;
 [ShiftClickOps]::keybd_event(0x10, 0, 0x0002, 0);
+`);
+    },
+
+    // Press the left mouse button at `from`, move to `to`, then release —
+    // a click-and-drag. from/to are { x, y }. When options.relativeTo (a
+    // window title pattern) is given, both points are offsets from that
+    // window's top-left corner.
+    async drag({ from, to }, options = {}) {
+      let fromX = from.x;
+      let fromY = from.y;
+      let toX = to.x;
+      let toY = to.y;
+      if (options.relativeTo) {
+        const rect = await getWindowRect(options.relativeTo);
+        fromX += rect.x;
+        fromY += rect.y;
+        toX += rect.x;
+        toY += rect.y;
+      }
+      // MOUSEEVENTF_LEFTDOWN = 0x0002, MOUSEEVENTF_LEFTUP = 0x0004
+      await runPowerShell(`
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class DragOps {
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, int dwExtraInfo);
+}
+"@
+[DragOps]::SetCursorPos(${fromX}, ${fromY});
+Start-Sleep -Milliseconds 100;
+[DragOps]::mouse_event(0x0002, 0, 0, 0, 0);
+Start-Sleep -Milliseconds 100;
+[DragOps]::SetCursorPos(${toX}, ${toY});
+Start-Sleep -Milliseconds 100;
+[DragOps]::mouse_event(0x0004, 0, 0, 0, 0);
+`);
+    },
+
+    // Scroll the mouse wheel at (x, y). `delta` is a small integer: positive
+    // scrolls up, negative scrolls down (it's multiplied by WHEEL_DELTA=120).
+    // When options.relativeTo (a window title pattern) is given, x/y are
+    // offsets from that window's top-left corner.
+    async scroll(x, y, delta, options = {}) {
+      if (options.relativeTo) {
+        const rect = await getWindowRect(options.relativeTo);
+        x += rect.x;
+        y += rect.y;
+      }
+      const wheel = Math.round(Number(delta) * 120);
+      // MOUSEEVENTF_WHEEL = 0x0800; dwData is signed wheel movement.
+      await runPowerShell(`
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class ScrollOps {
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, int dwData, int dwExtraInfo);
+}
+"@
+[ScrollOps]::SetCursorPos(${x}, ${y});
+Start-Sleep -Milliseconds 100;
+[ScrollOps]::mouse_event(0x0800, 0, 0, ${wheel}, 0);
 `);
     },
 
@@ -255,6 +427,39 @@ $bitmap.Dispose();
 `);
     },
 
+    // Capture only the bounds of the window whose MainWindowTitle contains
+    // titlePattern, saving to outputPath. Throws if the window is not found.
+    async screenshotWindow(outputPath, titlePattern) {
+      const escaped = psEscape(titlePattern);
+      await runPowerShell(`
+Add-Type -AssemblyName System.Windows.Forms;
+Add-Type -AssemblyName System.Drawing;
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class WinShotRect {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+}
+"@
+$proc = Get-Process | Where-Object {$_.MainWindowTitle -like '*${escaped}*'} | Select-Object -First 1;
+if ($null -eq $proc) { throw "Window matching '${escaped}' not found" }
+$rect = New-Object WinShotRect+RECT;
+[WinShotRect]::GetWindowRect($proc.MainWindowHandle, [ref]$rect) | Out-Null;
+$width = $rect.Right - $rect.Left;
+$height = $rect.Bottom - $rect.Top;
+if ($width -le 0 -or $height -le 0) { throw "Window matching '${escaped}' has no visible area to capture" }
+$bitmap = New-Object System.Drawing.Bitmap($width, $height);
+$graphics = [System.Drawing.Graphics]::FromImage($bitmap);
+$graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size);
+$bitmap.Save('${outputPath.replace(/\\/g, "\\\\")}');
+$graphics.Dispose();
+$bitmap.Dispose();
+`);
+      return outputPath;
+    },
+
     // --- Image: Screenshot region ---
     async screenshotRegion(outputPath, region) {
       const tmpFile = await takeTempScreenshot();
@@ -268,6 +473,17 @@ $bitmap.Dispose();
 
     // --- Image: OCR (read text from screen) ---
     async readText(region, options = {}) {
+      // Window-targeted OCR: when options.window (a title pattern) is given and
+      // no explicit region, capture just that window and OCR the whole image.
+      if (options.window && !region) {
+        const tmpWindow = path.join(os.tmpdir(), `marvin-window-ocr-${Date.now()}.png`);
+        try {
+          await driver.screenshotWindow(tmpWindow, options.window);
+          return await ocrFromImage(tmpWindow, options);
+        } finally {
+          try { fs.unlinkSync(tmpWindow); } catch {}
+        }
+      }
       const tmpFile = await takeTempScreenshot();
       try {
         let imageInput = tmpFile;
@@ -345,6 +561,79 @@ $bitmap.Dispose();
       }
 
       throw new Error(`Text "${expectedText}" not found on screen within ${timeout}ms`);
+    },
+
+    // --- UI Automation: control interaction ---
+    // Locate a control under a window (matched by partial title) or the whole
+    // desktop if windowTitle is null/empty. The locator may specify any of
+    // name, className, controlId. Returns identifying info; throws if not found.
+    async findControl(windowTitle, locator = {}) {
+      const script = buildControlScript(
+        windowTitle,
+        locator,
+        `Write-Output ("FOUND|" + $element.Current.Name + "|" + $element.Current.ClassName + "|" + $element.Current.AutomationId)`
+      );
+      let result;
+      try {
+        result = await runPowerShell(script);
+      } catch (err) {
+        throw new Error(`Control not found (window: "${windowTitle || "foreground"}", locator: ${JSON.stringify(locator)}): ${err.message}`);
+      }
+      const body = String(result).split("FOUND|")[1];
+      if (body == null) {
+        throw new Error(`Control not found (window: "${windowTitle || "foreground"}", locator: ${JSON.stringify(locator)})`);
+      }
+      const parts = body.split("|");
+      return { found: true, name: parts[0] || "", className: parts[1] || "", automationId: parts[2] || "" };
+    },
+
+    // Click a control: prefer the InvokePattern, fall back to clicking its
+    // clickable point via mouse_event. Throws if not found.
+    async clickControl(windowTitle, locator) {
+      const action = `
+$invoked = $false;
+try {
+  $invoke = [System.Windows.Automation.InvokePattern]$element.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern);
+  $invoke.Invoke();
+  $invoked = $true;
+} catch { $invoked = $false }
+if (-not $invoked) {
+  $pt = $element.GetClickablePoint();
+  Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class CtrlClickOps {
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, int dwExtraInfo);
+}
+"@
+  [CtrlClickOps]::SetCursorPos([int]$pt.X, [int]$pt.Y);
+  Start-Sleep -Milliseconds 100;
+  [CtrlClickOps]::mouse_event(0x0002, 0, 0, 0, 0);
+  [CtrlClickOps]::mouse_event(0x0004, 0, 0, 0, 0);
+}
+`;
+      await runControlAction(windowTitle, locator, action, "click");
+    },
+
+    // Set a control's value via the ValuePattern. Throws if not found.
+    async setControlText(windowTitle, locator, text) {
+      const action = `
+$value = [System.Windows.Automation.ValuePattern]$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern);
+$value.SetValue('${psEscape(text)}');
+`;
+      await runControlAction(windowTitle, locator, action, "set text");
+    },
+
+    // Read a control's value via the ValuePattern, falling back to its Name.
+    // Throws if the control is not found.
+    async getControlText(windowTitle, locator) {
+      const action = `
+$pattern = $null;
+try { $pattern = [System.Windows.Automation.ValuePattern]$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern) } catch { $pattern = $null }
+if ($null -ne $pattern) { Write-Output $pattern.Current.Value } else { Write-Output $element.Current.Name }
+`;
+      return await runControlAction(windowTitle, locator, action, "get text");
     },
 
     // --- Cleanup ---

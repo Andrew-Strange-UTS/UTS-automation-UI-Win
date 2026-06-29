@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from "react";
 import TestCard from "@/components/TestCard";
 import RunSequence from "@/components/RunSequence";
 import LogGroup from "@/components/LogGroup";
+import LogContent from "@/components/LogContent";
 import SecretsPanel from "@/components/SecretsPanel";
 import PrivateRepoCheckbox from "@/components/PrivateRepoCheckbox";
 import PATPopup from "@/components/PATPopup";
@@ -48,6 +49,12 @@ export default function App() {
   const [secretsOpen, setSecretsOpen] = useState(false);
   const [availableSecrets, setAvailableSecrets] = useState([]);
   const [patPopupOpen, setPatPopupOpen] = useState(false);
+  const [testerName, setTesterName] = useState(() =>
+    typeof window !== "undefined" ? localStorage.getItem("testerName") || "" : ""
+  );
+  useEffect(() => {
+    if (typeof window !== "undefined") localStorage.setItem("testerName", testerName);
+  }, [testerName]);
   const platform =
     typeof window !== "undefined" && window.electronAPI?.platform
       ? window.electronAPI.platform
@@ -334,6 +341,15 @@ export default function App() {
     currentStepRef.current = null;
     setServerSideLogs({});
     setTestResults({});
+  };
+  // Dry run (EPEA-2516): display the validation report in the same log viewer.
+  const handleDryRunReport = (logsByKey, resultsByTest) => {
+    logsAccumulatorRef.current = { ...logsByKey };
+    sequenceBufferRef.current = "";
+    currentStepRef.current = null;
+    setServerSideLogs({ ...logsByKey });
+    setTestResults(resultsByTest || {});
+    setIsServerLogExpanded(true);
   };
   const hiddenTests = [
     "OKTA-Prod-Login",
@@ -692,18 +708,9 @@ export default function App() {
                 <LogGroup
                   key={name}
                   title={name}
-                  defaultCollapsed={name !== "[SEQUENCE]"}
+                  defaultCollapsed={name !== "[SEQUENCE]" && name !== "[DRY RUN]"}
                 >
-                  <pre
-                    style={{
-                      margin: 0,
-                      padding: 15,
-                      whiteSpace: "pre-wrap",
-                      fontSize: "13px",
-                    }}
-                  >
-                    {log || "No logs yet."}
-                  </pre>
+                  <LogContent log={log} />
                 </LogGroup>
               ))}
             </div>
@@ -802,6 +809,19 @@ export default function App() {
               Desktop tests require Windows + PowerShell and are disabled on Linux.
             </div>
           )}
+          <div style={{ marginTop: "12px" }}>
+            <label style={{ fontSize: "13px", color: theme.primary, fontWeight: "bold" }}>
+              Tester name (optional):{" "}
+              <input
+                type="text"
+                value={testerName}
+                onChange={(e) => setTesterName(e.target.value)}
+                placeholder="e.g. Jane Smith"
+                title="Recorded as 'Executed by' on Zephyr results"
+                style={{ padding: "6px 10px", fontSize: "13px", borderRadius: "4px", border: "1px solid #ccc", width: "200px", fontWeight: "normal" }}
+              />
+            </label>
+          </div>
         </div>
         {/* Test cards */}
         {loading ? (
@@ -899,11 +919,14 @@ export default function App() {
           ...(testOptions[t.name] || {}),
         }))}
         testType={testType}
+        executedBy={testerName}
+        availableSecrets={availableSecrets}
         onTestResult={(name, options, onDone) =>
           handleRunTestViaWebSocket(name, testOptions[name], onDone)
         }
         onSequenceLog={handleSequenceLog}
         onBeforeRun={handleClearAllLogs}
+        onDryRunReport={handleDryRunReport}
       />
     </div>
   );

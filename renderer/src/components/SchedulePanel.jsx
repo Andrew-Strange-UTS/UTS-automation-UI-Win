@@ -82,6 +82,7 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
   const [selectedDays, setSelectedDays] = useState(["mon", "tue", "wed", "thu", "fri"]);
   const [ntfyTopic, setNtfyTopic] = useState("");
   const [ntfyServer, setNtfyServer] = useState("");
+  const [executedBy, setExecutedBy] = useState("");
   const [teamsWebhookAll, setTeamsWebhookAll] = useState("");
   const [teamsWebhookFail, setTeamsWebhookFail] = useState("");
   const [expandedLogs, setExpandedLogs] = useState({});
@@ -100,6 +101,7 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
   const [editDays, setEditDays] = useState([]);
   const [editNtfyTopic, setEditNtfyTopic] = useState("");
   const [editNtfyServer, setEditNtfyServer] = useState("");
+  const [editExecutedBy, setEditExecutedBy] = useState("");
   const [editTeamsWebhookAll, setEditTeamsWebhookAll] = useState("");
   const [editTeamsWebhookFail, setEditTeamsWebhookFail] = useState("");
   const [serviceDown, setServiceDown] = useState(false);
@@ -151,6 +153,7 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
           days: selectedDays,
           ntfyTopic: ntfyTopic.trim(),
           ntfyServer: ntfyServer.trim(),
+          executedBy: executedBy.trim(),
           teamsWebhookAll: teamsWebhookAll.trim(),
           teamsWebhookFail: teamsWebhookFail.trim(),
         }),
@@ -202,6 +205,7 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
     setEditDays([...(s.days || [])]);
     setEditNtfyTopic(s.ntfyTopic || "");
     setEditNtfyServer(s.ntfyServer || "");
+    setEditExecutedBy(s.executedBy || "");
     setEditTeamsWebhookAll(s.teamsWebhookAll || "");
     setEditTeamsWebhookFail(s.teamsWebhookFail || "");
   };
@@ -228,6 +232,7 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
           days: editDays,
           ntfyTopic: editNtfyTopic.trim(),
           ntfyServer: editNtfyServer.trim(),
+          executedBy: editExecutedBy.trim(),
           teamsWebhookAll: editTeamsWebhookAll.trim(),
           teamsWebhookFail: editTeamsWebhookFail.trim(),
         }),
@@ -566,6 +571,19 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
             ))}
           </div>
 
+          <div style={{ marginBottom: "12px" }}>
+            <label style={{ fontSize: "13px" }}>
+              Tester name (optional):
+              <input
+                type="text"
+                value={executedBy}
+                onChange={(e) => setExecutedBy(e.target.value)}
+                placeholder="Recorded as 'Executed by' on Zephyr results"
+                style={{ marginLeft: "6px", padding: "5px 8px", borderRadius: "4px", border: "1px solid #ccc", width: "320px" }}
+              />
+            </label>
+          </div>
+
           <div style={{ marginBottom: "12px", padding: "12px", backgroundColor: theme.primaryMedium, borderRadius: "6px", border: `1px solid ${theme.primaryBorder}` }}>
             <strong style={{ fontSize: "13px" }}>Notifications</strong>
             <div style={{ display: "flex", gap: "12px", alignItems: "center", marginTop: "8px", flexWrap: "wrap" }}>
@@ -791,6 +809,12 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
                 </div>
               )}
 
+              {s.executedBy && (
+                <div style={{ marginTop: "4px", fontSize: "12px", color: "#555" }}>
+                  Executed by: <strong>{s.executedBy}</strong>
+                </div>
+              )}
+
               {(s.ntfyTopic || s.teamsWebhookAll || s.teamsWebhookFail) && (
                 <div style={{ marginTop: "4px", fontSize: "12px", color: "#555" }}>
                   Notifications:{" "}
@@ -887,6 +911,19 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
                       </button>
                     ))}
                   </div>
+                  <div style={{ marginBottom: "10px" }}>
+                    <label style={{ fontSize: "12px" }}>
+                      Tester name (optional):
+                      <input
+                        type="text"
+                        value={editExecutedBy}
+                        onChange={(e) => setEditExecutedBy(e.target.value)}
+                        placeholder="Recorded as 'Executed by' on Zephyr results"
+                        style={{ marginLeft: "4px", padding: "4px 8px", borderRadius: "4px", border: "1px solid #ccc", width: "280px" }}
+                      />
+                    </label>
+                  </div>
+
                   <div style={{ marginBottom: "10px", padding: "10px", backgroundColor: theme.primaryMedium, borderRadius: "6px", border: `1px solid ${theme.primaryBorder}` }}>
                     <strong style={{ fontSize: "12px" }}>Notifications</strong>
                     <div style={{ display: "flex", gap: "10px", alignItems: "center", marginTop: "6px", flexWrap: "wrap" }}>

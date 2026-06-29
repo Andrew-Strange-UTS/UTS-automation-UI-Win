@@ -7,7 +7,7 @@ const { spawn } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
 const router = express.Router();
 const { TESTS_ROOT } = require("../utils/paths");
-const { getChromeBinary } = require("../utils/chromeFinder");
+const { getChromeBinary, isSnapChromium } = require("../utils/chromeFinder");
 const BUILTINS_DIR = path.join(__dirname, "../builtins");
 
 // --- Import secrets handling utilities ---
@@ -33,7 +33,7 @@ function injectSecretsInParams(obj) {
 }
 
 router.post("/run", async (req, res) => {
-  const { sequence, parameters = {}, testType = "web" } = req.body;
+  const { sequence, parameters = {}, testType = "web", executedBy = "" } = req.body;
   if (!Array.isArray(sequence) || sequence.length === 0) {
     res.status(400).json({ error: "No tests in sequence" });
     return;
@@ -106,9 +106,17 @@ ${chromeBinaryLine}
   let failedCount = 0;
   let passedCount = 0;
   try {
-    driver = remoteUrl
-      ? await new Builder().forBrowser("chrome").setChromeOptions(options).usingServer(remoteUrl).build()
-      : await new Builder().forBrowser("chrome").setChromeOptions(options).build();
+    try {
+      driver = remoteUrl
+        ? await new Builder().forBrowser("chrome").setChromeOptions(options).usingServer(remoteUrl).build()
+        : await new Builder().forBrowser("chrome").setChromeOptions(options).build();
+    } catch (buildErr) {
+      const m = (buildErr && (buildErr.message || String(buildErr))) || "";
+      if ((buildErr && buildErr.name === "SessionNotCreatedError") || /session not created|cannot find chrome|chrome not reachable|chromedriver/i.test(m)) {
+        throw new Error("Could not start Chrome for the web test. Ensure Google Chrome (or Chromium) is installed and current; if you use snap Chromium on Ubuntu, install the Google Chrome .deb instead. Original error: " + m);
+      }
+      throw buildErr;
+    }
 `;
 
     const driverTeardownCode = isDesktop
@@ -122,6 +130,10 @@ ${chromeBinaryLine}
 ${isDesktop ? "" : `const { Builder, By, Key, until } = require('selenium-webdriver');
 const chrome = require('selenium-webdriver/chrome');`}
 const { postTestExecution } = require(${JSON.stringify(path.join(__dirname, "../utils/zephyr.js"))});
+const fs = require('fs');
+const nodePath = require('path');
+const FAILURE_DIR = ${JSON.stringify(path.join(seqDir, "failures"))};
+const EXECUTED_BY = ${JSON.stringify(executedBy)};
 const stepFns = [
 ${sequence.map(test => {
   if (test.builtin) {
@@ -138,6 +150,24 @@ ${sequence.map(test => `  ${JSON.stringify(test.zephyr || null)}`).join(",\n")}
 ];
 const ZEPHYR_TOKEN = ${JSON.stringify(zephyrToken)};
 function log(msg) { process.stdout.write(msg + "\\n"); }
+// EPEA-2514: capture a screenshot at the moment a step fails, save it under the
+// per-run failures/ folder, and emit a marker the log viewer renders as a thumbnail.
+async function captureFailureScreenshot(testName) {
+  try {
+    if (!fs.existsSync(FAILURE_DIR)) fs.mkdirSync(FAILURE_DIR, { recursive: true });
+    const safe = String(testName).replace(/[^a-zA-Z0-9_-]/g, "_");
+    const file = nodePath.join(FAILURE_DIR, safe + "-" + Date.now() + ".png");
+    ${isDesktop
+      ? `await driver.screenshot(file);`
+      : `const b64 = await driver.takeScreenshot(); fs.writeFileSync(file, Buffer.from(b64, "base64"));`}
+    log("📷 Failure screenshot saved: " + file);
+    log("[[SCREENSHOT]]" + file);
+    return file;
+  } catch (e) {
+    log("[failure-screenshot] could not capture: " + (e && e.message || e));
+    return null;
+  }
+}
 async function sendZephyrResult(zephyrConfig, statusName, stepResults) {
   if (!zephyrConfig || !ZEPHYR_TOKEN) return;
   try {
@@ -146,6 +176,7 @@ async function sendZephyrResult(zephyrConfig, statusName, stepResults) {
       testCaseKey: zephyrConfig.caseKey,
       testCycleKey: zephyrConfig.cycleKey,
       statusName,
+      executedBy: EXECUTED_BY || undefined,
       testScriptResults: stepResults.length > 0 ? stepResults : undefined,
     });
     log("[Zephyr] Reported " + statusName + " for " + zephyrConfig.caseKey + " (HTTP " + result.statusCode + ")");
@@ -199,6 +230,7 @@ ${driverSetupCode}
         failedCount++;
         console.error("❌ Step #" + (i + 1) + " [" + testName + "] failed:", stepError && stepError.stack || stepError);
         zephyrLog("ERROR: " + (stepError && stepError.message || stepError), "Fail");
+        await captureFailureScreenshot(testName);
         await sendZephyrResult(zephyrConfig, "Fail", zephyrStepResults);
       }
     }
@@ -229,6 +261,13 @@ main();
     await new Promise((resolve) => setTimeout(resolve, 2000));
     res.write(`[client log] Now running ${seqId}\n`);
     console.log(`[client log] Now running ${seqId}`);
+    // EPEA-2500 AC5: warn (without blocking) when web tests will run against a
+    // snap-packaged Chromium, whose confinement often breaks Selenium.
+    if (!isDesktop && isSnapChromium(getChromeBinary())) {
+      res.write(
+        "⚠️ Warning: a snap-packaged Chromium was detected. Snap confinement can cause Selenium to fail (sandbox / profile errors). If the run fails, install Google Chrome (.deb) or a non-snap Chromium.\n"
+      );
+    }
     const childEnv = {
       ...process.env,
       NODE_PATH: process.env.NODE_PATH,

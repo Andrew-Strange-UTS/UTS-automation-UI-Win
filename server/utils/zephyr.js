@@ -13,18 +13,24 @@ const https = require("https");
  * @param {string} opts.testCycleKey
  * @param {string} opts.statusName        - overall "Pass" or "Fail"
  * @param {string} [opts.comment]         - optional overall execution comment
+ * @param {string} [opts.executedBy]      - optional tester name; recorded as "Executed by"
  * @param {Array}  [opts.testScriptResults] - per-step results array
  *   Each entry: { statusName: "Pass"|"Fail", actualResult: "description" }
  * @returns {Promise<{statusCode: number, body: string}>}
  */
-function postTestExecution(token, { projectKey, testCaseKey, testCycleKey, statusName, comment, testScriptResults }) {
+function postTestExecution(token, { projectKey, testCaseKey, testCycleKey, statusName, comment, executedBy, testScriptResults }) {
   return new Promise((resolve, reject) => {
+    // The Zephyr Scale Cloud API only accepts an Atlassian account id for the
+    // native "executedById" field, so a free-text tester name is surfaced in the
+    // execution comment as "Executed by: <name>".
+    const executedByLine = executedBy ? `Executed by: ${executedBy}` : "";
+    const fullComment = [executedByLine, comment].filter(Boolean).join("\n") || undefined;
     const payload = JSON.stringify({
       projectKey,
       testCaseKey,
       testCycleKey,
       statusName,
-      ...(comment ? { comment } : {}),
+      ...(fullComment ? { comment: fullComment } : {}),
       ...(testScriptResults && testScriptResults.length > 0 ? { testScriptResults } : {}),
     });
 

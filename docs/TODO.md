@@ -13,7 +13,7 @@
 - [x] AC2: Installer package and .exe are named marvin-setup-x.x.x.exe.
 - [x] AC3: All in-app headings, labels, and About panel reference 'Marvin' — no legacy product name visible to the user.
 - [x] AC4: README and docs/creating-tests.md updated with new name.
-- [ ] AC5: App tray icon tooltip reads 'Marvin'.
+- [x] AC5: App tray icon tooltip reads 'Marvin'.
 
 ---
 
@@ -120,8 +120,8 @@
 **Acceptance Criteria:**
 - [x] AC1: `sendShortcut(handle, 'ctrl+a')` selects all content in the target window. *(Implemented as `driver.hotkey(modifier, key)`)*
 - [x] AC2: `sendShortcut(handle, 'ctrl+c')` copies selected content to clipboard. *(Implemented as `driver.hotkey(modifier, key)`)*
-- [ ] AC3: `setClipboard('test value')` sets the Windows clipboard content. *(Not implemented)*
-- [ ] AC4: `getClipboard()` returns the current clipboard text. *(Not implemented)*
+- [x] AC3: `setClipboard('test value')` sets the Windows clipboard content.
+- [x] AC4: `getClipboard()` returns the current clipboard text.
 - [x] AC5: Shortcuts are expressed as human-readable strings ('ctrl+shift+s', 'alt+f4').
 
 ---
@@ -134,7 +134,7 @@
 - [x] AC1: Built-in desktop sample test appears in the test list when no repo is loaded (Desktop mode).
 - [x] AC2: Sample test runs successfully end-to-end on Windows without modification.
 - [x] AC3: docs/creating-tests.md includes a Desktop Driver API reference table covering all methods.
-- [ ] AC4: A copy-pasteable AI prompt in the docs generates a valid desktop test when pasted into an AI tool. *(Not included in docs)*
+- [x] AC4: A copy-pasteable AI prompt in the docs generates a valid desktop test when pasted into an AI tool.
 
 ---
 
@@ -318,7 +318,7 @@
 - [x] AC2: Users can update an existing secret's value.
 - [x] AC3: Users can delete a secret with a confirmation prompt.
 - [x] AC4: Secret references (`parameters.MY_SECRET`) are resolved at runtime before the test script runs.
-- [ ] AC5: A test card using an undefined secret reference shows a warning badge. *(Not implemented)*
+- [x] AC5: A test card using an undefined secret reference shows a warning badge.
 - [x] AC6: Secrets are never logged in the run output.
 
 ---
@@ -373,7 +373,7 @@
 - [x] AC1: ntfy topic field appears in schedule notification settings.
 - [x] AC2: A notification is sent to ntfy.sh/{topic} on the configured trigger event.
 - [x] AC3: Notification title is the schedule name; body includes pass/fail count.
-- [ ] AC4: Optional custom ntfy server URL is supported. *(Hardcoded to ntfy.sh)*
+- [x] AC4: Optional custom ntfy server URL is supported.
 - [x] AC5: ntfy failure (e.g. network issue) is logged but does not affect the test run.
 
 ---
@@ -460,14 +460,14 @@
 
 | Category | Stories | Fully Complete | Partially Complete | Not Started |
 |----------|---------|----------------|--------------------|-------------|
-| Rename & Language Support | 2 | 0 | 1 (EPEA-2486) | 1 (EPEA-1916) |
+| Rename & Language Support | 2 | 1 (EPEA-2486) | 0 | 1 (EPEA-1916) |
 | Electron Shell & Startup | 4 | 0 | 4 | 0 |
-| Desktop Driver | 4 | 0 | 3 | 1 (EPEA-2492) |
+| Desktop Driver | 4 | 2 (EPEA-2493, EPEA-2494) | 1 | 1 (EPEA-2492) |
 | Image & OCR | 6 | 2 (EPEA-2496, EPEA-2498) | 3 | 1 (EPEA-2514) |
 | Web Runner | 2 | 1 (EPEA-2501) | 1 | 0 |
 | Scheduling | 3 | 2 (EPEA-2502, EPEA-2504) | 1 | 0 |
-| Secrets Management | 2 | 0 | 2 | 0 |
-| Reporting & Notifications | 4 | 2 (EPEA-2507, EPEA-2508) | 1 | 1 (EPEA-2692) |
+| Secrets Management | 2 | 1 (EPEA-2506) | 1 | 0 |
+| Reporting & Notifications | 4 | 3 (EPEA-2507, EPEA-2508, EPEA-2509) | 0 | 1 (EPEA-2692) |
 | Repo & Distribution | 2 | 2 (EPEA-2510, EPEA-2511) | 0 | 0 |
 | Testing & Onboarding | 3 | 0 | 0 | 3 |
-| **Totals** | **33** | **9** | **15** | **7** |
+| **Totals** | **32** | **14** | **11** | **7** |

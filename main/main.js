@@ -1,5 +1,5 @@
 // main/main.js — Electron main process
-const { app, BrowserWindow, shell } = require("electron");
+const { app, BrowserWindow, Tray, Menu, nativeImage, shell } = require("electron");
 const path = require("path");
 const { startBackend, stopBackend } = require("./backend-manager");
 
@@ -7,6 +7,39 @@ const isDev = !app.isPackaged;
 const BACKEND_PORT = 5000;
 
 let mainWindow;
+let tray;
+
+function createTray() {
+  try {
+    const iconPath = path.join(__dirname, "../resources/icons/icon.ico");
+    const image = nativeImage.createFromPath(iconPath);
+    tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image);
+    tray.setToolTip("Marvin");
+    const menu = Menu.buildFromTemplate([
+      {
+        label: "Show Marvin",
+        click: () => {
+          if (mainWindow) {
+            mainWindow.show();
+            mainWindow.focus();
+          } else {
+            createWindow();
+          }
+        },
+      },
+      { type: "separator" },
+      { label: "Quit", click: () => app.quit() },
+    ]);
+    tray.setContextMenu(menu);
+    tray.on("click", () => {
+      if (mainWindow) {
+        mainWindow.isVisible() ? mainWindow.focus() : mainWindow.show();
+      }
+    });
+  } catch (err) {
+    console.error("[tray] Failed to create system tray:", err.message);
+  }
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -45,6 +78,7 @@ app.whenReady().then(async () => {
   await startBackend(BACKEND_PORT);
 
   createWindow();
+  createTray();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

@@ -12,6 +12,7 @@ export default function TestCard({
   onOptionsChange = () => {},
   results = {},
   testType = "web",
+  availableSecrets = [],
 }) {
   const [openViewer, setOpenViewer] = useState(null);
   const [status, setStatus] = useState("Never run");
@@ -44,6 +45,20 @@ export default function TestCard({
   const parameterArr = Array.isArray(parsedMetadata["needed-parameters"])
     ? parsedMetadata["needed-parameters"]
     : [];
+
+  // Collect ${{ secrets.NAME }} references from the test code and metadata, then
+  // flag any that aren't present in the secrets store (EPEA-2506).
+  const referencedSecrets = (() => {
+    const found = new Set();
+    const re = /\$\{\{\s*secrets\.([A-Za-z0-9_]+)\s*\}\}/g;
+    for (const source of [runContent, metaContent]) {
+      if (!source) continue;
+      let match;
+      while ((match = re.exec(source)) !== null) found.add(match[1]);
+    }
+    return [...found];
+  })();
+  const missingSecrets = referencedSecrets.filter((s) => !availableSecrets.includes(s));
 
   // 1. Fill manualParams with defaults on metaContent change or new param definitions
   useEffect(() => {
@@ -102,7 +117,28 @@ export default function TestCard({
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <h2>{title}</h2>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+          <h2 style={{ margin: 0 }}>{title}</h2>
+          {missingSecrets.length > 0 && (
+            <span
+              title={`This test references ${missingSecrets.length === 1 ? "a secret" : "secrets"} not found in the Secrets Manager: ${missingSecrets.join(", ")}. Add ${missingSecrets.length === 1 ? "it" : "them"} before running.`}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "5px",
+                padding: "3px 10px",
+                background: "#fff4e5",
+                color: "#8a5300",
+                border: "1px solid #f0c279",
+                borderRadius: "12px",
+                fontSize: "12px",
+                fontWeight: "bold",
+              }}
+            >
+              ⚠️ Missing secret{missingSecrets.length > 1 ? "s" : ""}: {missingSecrets.join(", ")}
+            </span>
+          )}
+        </div>
         <div style={{ textAlign: "right" }}>
           <div style={{ marginBottom: "10px" }}>
             <strong>Status:</strong> {status}

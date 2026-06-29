@@ -46,6 +46,7 @@ export default function App() {
   const [serverSideLogs, setServerSideLogs] = useState({});
   const [isServerLogExpanded, setIsServerLogExpanded] = useState(false);
   const [secretsOpen, setSecretsOpen] = useState(false);
+  const [availableSecrets, setAvailableSecrets] = useState([]);
   const [patPopupOpen, setPatPopupOpen] = useState(false);
   const [testType, setTestType] = useState(() =>
     typeof window !== "undefined" ? localStorage.getItem("testType") || "desktop" : "desktop"
@@ -67,6 +68,22 @@ export default function App() {
       localStorage.setItem("privateRepo", privateRepo ? "true" : "false");
     }
   }, [privateRepo]);
+
+  // Keep the list of available secret names current so test cards can flag
+  // references to secrets that don't exist. Refreshes when the Secrets panel closes.
+  const loadAvailableSecrets = async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/secrets`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      setAvailableSecrets(data.secrets || []);
+    } catch {
+      // ignore — badge simply won't show without the list
+    }
+  };
+  useEffect(() => {
+    if (!secretsOpen) loadAvailableSecrets();
+  }, [secretsOpen]);
   // WebSocket single test runner
   const handleRunTestViaWebSocket = (testName, options = {}, onDone) => {
     const startTime = new Date().toLocaleString();
@@ -787,6 +804,7 @@ export default function App() {
                   onOptionsChange={handleOptionsChange}
                   results={testResults["__default-desktop-test"]}
                   testType={testType}
+                  availableSecrets={availableSecrets}
                 />
                 <TestCard
                   key="__default-desktop-showcase"
@@ -801,6 +819,7 @@ export default function App() {
                   onOptionsChange={handleOptionsChange}
                   results={testResults["__default-desktop-showcase"]}
                   testType={testType}
+                  availableSecrets={availableSecrets}
                 />
               </>
             ) : (
@@ -817,6 +836,7 @@ export default function App() {
                 onOptionsChange={handleOptionsChange}
                 results={testResults["__default-test"]}
                 testType={testType}
+                availableSecrets={availableSecrets}
               />
             )}
           </>
@@ -833,6 +853,7 @@ export default function App() {
               onOptionsChange={handleOptionsChange}
               results={testResults[name]}
               testType={testType}
+              availableSecrets={availableSecrets}
             />
           ))
         )}

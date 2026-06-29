@@ -228,6 +228,19 @@ ${lookup}
       return new Promise((resolve) => setTimeout(resolve, ms));
     },
 
+    // --- Clipboard ---
+    // Set the Windows clipboard to the given text.
+    async setClipboard(text) {
+      // Single quotes are doubled for PowerShell single-quoted string literals.
+      const escaped = String(text).replace(/'/g, "''");
+      await runPowerShell(`Set-Clipboard -Value '${escaped}'`);
+    },
+
+    // Return the current Windows clipboard text (empty string if clipboard has no text).
+    async getClipboard() {
+      return await runPowerShell(`Get-Clipboard -Raw`);
+    },
+
     async screenshot(outputPath) {
       await runPowerShell(`
 Add-Type -AssemblyName System.Windows.Forms;

@@ -216,6 +216,8 @@ module.exports = async function (driver, parameters = {}, zephyrLog) {
 | `driver.launch(exePath, args?)` | Launch an application (waits 2s after launch) |
 | `driver.closeWindow()` | Send Alt+F4 to close the focused window |
 | `driver.pause(ms)` | Wait for the given number of milliseconds |
+| `driver.setClipboard(text)` | Set the Windows clipboard contents to `text` |
+| `driver.getClipboard()` | Return the current Windows clipboard text |
 | `driver.screenshot(outputPath)` | Take a screenshot and save to the given path |
 | `driver.screenshotRegion(outputPath, region)` | Save a cropped region — `region = { x, y, width, height }` |
 | `driver.readText(region?, options?)` | OCR the screen (or a region) using Tesseract. Returns `{ text, confidence, words: [{ text, confidence, bbox: { x0, y0, x1, y1 } }] }` |
@@ -563,14 +565,23 @@ FOR DESKTOP TESTS (Windows only):
   - driver.hotkey(modifier, key) — shortcut for key combos like hotkey("Ctrl", "a")
   - driver.mouseMove(x, y) — move cursor to screen coordinates
   - driver.mouseClick(x, y, button?) — click at coordinates ("left" default, or "right")
-  - driver.doubleClick(x, y) — double-click at coordinates
+  - driver.doubleClick(x, y) — double-click at coordinates (selects a word in most apps)
+  - driver.tripleClick(x, y) — triple-click (selects a line/paragraph in most apps)
+  - driver.shiftClick(x, y, button?) — click holding Shift; combine with a prior
+    mouseClick to range-select text from the first point to here
 
   Window management:
   - driver.findWindow(titlePattern) — find window by partial title, returns handle
   - driver.focusWindow(titlePattern) — bring window to foreground by partial title
+  - driver.maximizeWindow(titlePattern?) — maximise window by title, or the
+    foreground window if no pattern is given
   - driver.getWindowTitle() — get focused window title
   - driver.launch(exePath, args?) — launch an app (waits 2s after)
   - driver.closeWindow() — send Alt+F4
+
+  Clipboard:
+  - driver.setClipboard(text) — set the Windows clipboard contents
+  - driver.getClipboard() — read the current clipboard text
 
   Utilities:
   - driver.pause(ms) — wait ms milliseconds

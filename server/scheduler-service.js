@@ -419,12 +419,13 @@ async function sendNotifications(schedule, code, logs) {
     try {
       const title = `Scheduled sequence ${result}: ${schedule.name}`;
       const body = `${schedule.name} finished at ${time}\nResult: ${result}\nSteps: ${stepNames}\n\nLogs:\n${logText}`;
-      const res = await fetch(`https://ntfy.sh/${schedule.ntfyTopic}`, {
+      const ntfyBase = (schedule.ntfyServer || "https://ntfy.sh").replace(/\/+$/, "");
+      const res = await fetch(`${ntfyBase}/${schedule.ntfyTopic}`, {
         method: "POST",
         headers: { Title: title, Priority: code === 0 ? "default" : "high", Tags: code === 0 ? "white_check_mark" : "x" },
         body,
       });
-      console.log(`[notify] ntfy sent to ${schedule.ntfyTopic} (HTTP ${res.status})`);
+      console.log(`[notify] ntfy sent to ${ntfyBase}/${schedule.ntfyTopic} (HTTP ${res.status})`);
     } catch (err) {
       console.error(`[notify] ntfy failed:`, err.message);
     }
@@ -587,7 +588,7 @@ app.get("/api/schedules/:id/logs", (req, res) => {
 
 // Create schedule
 app.post("/api/schedules", (req, res) => {
-  const { name, sequencePayload, time, days, ntfyTopic, teamsWebhookAll, teamsWebhookFail,
+  const { name, sequencePayload, time, days, ntfyTopic, ntfyServer, teamsWebhookAll, teamsWebhookFail,
           bundledSecrets: reqSecrets, bundledTestCode: reqCode, bundledImages: reqImages } = req.body;
 
   if (!name || !sequencePayload || !time || !days || !Array.isArray(days) || days.length === 0) {
@@ -613,6 +614,7 @@ app.post("/api/schedules", (req, res) => {
     time,
     days: days.map((d) => d.toLowerCase()),
     ntfyTopic: ntfyTopic || "",
+    ntfyServer: ntfyServer || "",
     teamsWebhookAll: teamsWebhookAll || "",
     teamsWebhookFail: teamsWebhookFail || "",
     status: "active",
@@ -631,10 +633,11 @@ app.patch("/api/schedules/:id", (req, res) => {
   const schedule = scheduleStore.getById(req.params.id);
   if (!schedule) return res.status(404).json({ error: "Schedule not found" });
 
-  const { name, time, days, ntfyTopic, teamsWebhookAll, teamsWebhookFail } = req.body;
+  const { name, time, days, ntfyTopic, ntfyServer, teamsWebhookAll, teamsWebhookFail } = req.body;
   const updates = {};
   if (name) updates.name = name;
   if (ntfyTopic !== undefined) updates.ntfyTopic = ntfyTopic;
+  if (ntfyServer !== undefined) updates.ntfyServer = ntfyServer;
   if (teamsWebhookAll !== undefined) updates.teamsWebhookAll = teamsWebhookAll;
   if (teamsWebhookFail !== undefined) updates.teamsWebhookFail = teamsWebhookFail;
   if (time) {
@@ -710,7 +713,7 @@ app.post("/api/schedules/:id/export", (req, res) => {
     exportedAt: new Date().toISOString(),
     schedule: {
       name: schedule.name, time: schedule.time, days: schedule.days,
-      ntfyTopic: schedule.ntfyTopic, teamsWebhookAll: schedule.teamsWebhookAll, teamsWebhookFail: schedule.teamsWebhookFail,
+      ntfyTopic: schedule.ntfyTopic, ntfyServer: schedule.ntfyServer, teamsWebhookAll: schedule.teamsWebhookAll, teamsWebhookFail: schedule.teamsWebhookFail,
     },
     sequencePayload: schedule.sequencePayload,
     bundledSecrets: schedule.bundledSecrets || {},
@@ -790,6 +793,7 @@ app.post("/api/schedules/import", (req, res) => {
     time: bundle.schedule.time,
     days: bundle.schedule.days,
     ntfyTopic: bundle.schedule.ntfyTopic || "",
+    ntfyServer: bundle.schedule.ntfyServer || "",
     teamsWebhookAll: bundle.schedule.teamsWebhookAll || "",
     teamsWebhookFail: bundle.schedule.teamsWebhookFail || "",
     status: "active",

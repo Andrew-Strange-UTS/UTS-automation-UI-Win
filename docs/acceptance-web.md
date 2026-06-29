@@ -1,4 +1,9 @@
-# Marvin — Web Mode Acceptance Test Checklist
+---
+title: "Acceptance: Web mode"
+nav_order: 4
+---
+
+# Marvin: Web Mode Acceptance Test Checklist
 
 This is a living acceptance-test checklist for **Web mode** in Marvin (the Electron test-automation app). A tester runs through it on a fresh install before each release to confirm that every Web mode feature works end to end: startup and diagnostics, Chrome detection, repo loading, test card configuration, sequence execution, OKTA wrapping, Zephyr Scale reporting, the Secrets Manager, scheduling, ntfy and Teams notifications, and encrypted `.utsb` export/import.
 

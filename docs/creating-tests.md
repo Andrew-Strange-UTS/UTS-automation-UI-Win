@@ -1,3 +1,8 @@
+---
+title: Creating Tests
+nav_order: 2
+---
+
 # Creating Tests for Marvin
 
 ## How Tests Work

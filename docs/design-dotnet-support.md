@@ -1,3 +1,8 @@
+---
+title: "Design: C# / .NET support"
+nav_order: 6
+---
+
 # Design: C# / .NET test support (EPEA-1916)
 
 Status: Draft for review

@@ -1,4 +1,9 @@
-# Marvin — Desktop Mode Acceptance Test Checklist
+---
+title: "Acceptance: Desktop mode"
+nav_order: 5
+---
+
+# Marvin: Desktop Mode Acceptance Test Checklist
 
 This is a living acceptance-test checklist for **Desktop mode** in Marvin (the Electron test-automation app). Desktop automation uses the PowerShell + Win32 driver, so this checklist runs only on **Windows 10/11**. It covers the full Desktop epic: basic window control, element interaction by control id/class, keyboard and clipboard, image template matching, OCR, wait-for-image and wait-for-text, mouse control (hover, drag, scroll), screenshots (full, region, window), template management, and running the built-in desktop sample test.
 

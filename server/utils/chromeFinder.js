@@ -88,6 +88,20 @@ function getChromeVersion(binaryPath) {
   }
 }
 
+// Detect a Snap-packaged Chromium on Linux. Snap confinement breaks Selenium's
+// sandbox/temp-profile handling, so callers should warn the user.
+function isSnapChromium(binaryPath) {
+  if (!binaryPath || process.platform !== "linux") return false;
+  try {
+    if (binaryPath.includes("/snap/")) return true;
+    // /usr/bin/chromium-browser is often a shim that points into /snap
+    const real = fs.realpathSync(binaryPath);
+    return real.includes("/snap/");
+  } catch {
+    return binaryPath.includes("/snap/");
+  }
+}
+
 // Cache results since binary location won't change during process lifetime
 let cachedBinary = undefined;
 let cachedVersion = undefined;
@@ -111,4 +125,4 @@ function getChromeVersionCached() {
   return cachedVersion;
 }
 
-module.exports = { getChromeBinary, getChromeVersion: getChromeVersionCached };
+module.exports = { getChromeBinary, getChromeVersion: getChromeVersionCached, isSnapChromium };

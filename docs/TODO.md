@@ -48,9 +48,9 @@
 
 **Acceptance Criteria:**
 - [x] AC1: Toggle is visible on the main dashboard below the Scheduled Sequences panel.
-- [ ] AC2: Switching mode clears the current run sequence and prompts for confirmation if the sequence is non-empty. *(Clears sequence but no confirmation prompt)*
+- [x] AC2: Switching mode clears the current run sequence and prompts for confirmation if the sequence is non-empty.
 - [x] AC3: Web mode shows OKTA environment selector and Visual Browser option on test cards; Desktop mode hides them.
-- [ ] AC4: On Linux, the desktop toggle is disabled with a tooltip explaining it requires Windows. *(Not implemented)*
+- [x] AC4: On Linux, the desktop toggle is disabled with a tooltip explaining it requires Windows.
 - [x] AC5: Selected mode persists across app restarts.
 
 ---
@@ -63,7 +63,7 @@
 - [x] AC1: Diagnostics screen appears on every launch before the main dashboard.
 - [x] AC2: All 7 checks (Node.js, OS, Git, Chrome, ChromeDriver, PowerShell, Scheduler) are shown with status badges.
 - [x] AC3: PowerShell check shows N/A on Linux rather than a failure.
-- [ ] AC4: Failed checks display a short remediation hint and, where applicable, a clickable link to install instructions. *(Shows status/details only, no remediation hints or install links)*
+- [x] AC4: Failed checks display a short remediation hint and, where applicable, a clickable link to install instructions.
 - [x] AC5: Continue button is always enabled — users can proceed even with failed checks.
 - [x] AC6: Results are re-evaluated on each launch (not cached from previous run).
 
@@ -75,7 +75,7 @@
 
 **Acceptance Criteria:**
 - [x] AC1: Diagnostics screen shows detected Chrome binary path when found.
-- [ ] AC2: Snap Chromium is detected and shows a warning about Selenium sandbox restrictions on Ubuntu. *(Not implemented)*
+- [x] AC2: Snap Chromium is detected and shows a warning about Selenium sandbox restrictions on Ubuntu.
 - [x] AC3: If no Chrome is found, diagnostics shows a clear failure with install instructions.
 - [x] AC4: Detected binary is used automatically — no manual config needed.
 - [x] AC5: Chrome finder result is used consistently by the web runner, sequence runner, and scheduler service.
@@ -270,7 +270,7 @@
 **Description:** Port the Scheduled Sequences panel from v2 to the Electron app. Features: create schedule (name, time, days/presets), inline edit, run now, pause/resume, stop, countdown to next run, last run log viewer, Zephyr keys displayed on card.
 
 **Acceptance Criteria:**
-- [ ] AC1: Schedule panel lists all schedules with name, next run time, status, and Zephyr keys. *(Lists name, next run, status — but Zephyr keys not shown on schedule cards)*
+- [x] AC1: Schedule panel lists all schedules with name, next run time, status, and Zephyr keys.
 - [x] AC2: Clicking '+ New Schedule' opens a creation form with name, time, days, and notification fields.
 - [x] AC3: Inline edit allows changing name, time, days, and notification settings without a separate screen.
 - [x] AC4: Run Now triggers an immediate execution without affecting the cron schedule.
@@ -461,13 +461,13 @@
 | Category | Stories | Fully Complete | Partially Complete | Not Started |
 |----------|---------|----------------|--------------------|-------------|
 | Rename & Language Support | 2 | 1 (EPEA-2486) | 0 | 1 (EPEA-1916) |
-| Electron Shell & Startup | 4 | 0 | 4 | 0 |
+| Electron Shell & Startup | 4 | 3 (EPEA-2488, EPEA-2489, EPEA-2490) | 1 (EPEA-2487) | 0 |
 | Desktop Driver | 4 | 2 (EPEA-2493, EPEA-2494) | 1 | 1 (EPEA-2492) |
 | Image & OCR | 6 | 2 (EPEA-2496, EPEA-2498) | 3 | 1 (EPEA-2514) |
 | Web Runner | 2 | 1 (EPEA-2501) | 1 | 0 |
-| Scheduling | 3 | 2 (EPEA-2502, EPEA-2504) | 1 | 0 |
+| Scheduling | 3 | 3 (EPEA-2502, EPEA-2503, EPEA-2504) | 0 | 0 |
 | Secrets Management | 2 | 1 (EPEA-2506) | 1 | 0 |
 | Reporting & Notifications | 4 | 3 (EPEA-2507, EPEA-2508, EPEA-2509) | 0 | 1 (EPEA-2692) |
 | Repo & Distribution | 2 | 2 (EPEA-2510, EPEA-2511) | 0 | 0 |
 | Testing & Onboarding | 3 | 0 | 0 | 3 |
-| **Totals** | **32** | **14** | **11** | **7** |
+| **Totals** | **32** | **18** | **7** | **7** |

@@ -5,7 +5,7 @@ const express = require("express");
 const { execFile, exec } = require("child_process");
 const os = require("os");
 const path = require("path");
-const { getChromeBinary, getChromeVersion } = require("../utils/chromeFinder");
+const { getChromeBinary, getChromeVersion, isSnapChromium } = require("../utils/chromeFinder");
 const router = express.Router();
 
 const SCHEDULER_URL = process.env.UTS_SCHEDULER_URL || "http://localhost:5050";
@@ -55,6 +55,12 @@ router.get("/", async (req, res) => {
     const m = out.match(/git version ([\d.]+)/);
     return m ? m[1] : out;
   });
+  if (!checks.git.ok) {
+    checks.git.hint = isWindows
+      ? "Install Git for Windows, then restart Marvin."
+      : "Install Git via your package manager (e.g. sudo apt install git).";
+    checks.git.helpUrl = "https://git-scm.com/downloads";
+  }
 
   // --- Chrome / Chromium (never launches the browser) ---
   const chromeBinary = getChromeBinary();
@@ -65,8 +71,19 @@ router.get("/", async (req, res) => {
       version: version || "installed",
       binary: chromeBinary,
     };
+    if (isSnapChromium(chromeBinary)) {
+      checks.chrome.warn = true;
+      checks.chrome.hint =
+        "Snap-packaged Chromium detected. Snap confinement can break Selenium (sandbox / temp-profile errors). If web tests fail, install Google Chrome (.deb) or a non-snap Chromium.";
+      checks.chrome.helpUrl = "https://www.google.com/chrome/";
+    }
   } else {
-    checks.chrome = { ok: false, detail: "Chrome/Chromium not found" };
+    checks.chrome = {
+      ok: false,
+      detail: "Chrome/Chromium not found",
+      hint: "Install Google Chrome (or Chromium) to run web tests.",
+      helpUrl: "https://www.google.com/chrome/",
+    };
   }
 
   // --- ChromeDriver ---
@@ -85,12 +102,18 @@ router.get("/", async (req, res) => {
       };
     } catch {
       checks.chromedriver.detail = "Not found. Install chromedriver or ensure selenium-webdriver can auto-download it.";
+      checks.chromedriver.hint = "Install ChromeDriver matching your Chrome version, or reinstall dependencies so selenium-webdriver can auto-download it.";
+      checks.chromedriver.helpUrl = "https://developer.chrome.com/docs/chromedriver/downloads";
     }
   }
 
   // --- PowerShell (Windows desktop automation) ---
   if (isWindows) {
     checks.powershell = await checkCommand("powershell", ["-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"], (out) => out);
+    if (!checks.powershell.ok) {
+      checks.powershell.hint = "PowerShell ships with Windows. Repair Windows or install PowerShell 7 to enable desktop tests.";
+      checks.powershell.helpUrl = "https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows";
+    }
   } else {
     // Check if pwsh is available on Linux (optional)
     const pwshResult = await checkCommand("pwsh", ["--version"], (out) => {
@@ -123,7 +146,13 @@ router.get("/", async (req, res) => {
       checks.scheduler = { ok: false, detail: `Service returned HTTP ${healthRes.status}` };
     }
   } catch (err) {
-    checks.scheduler = { ok: false, detail: "Service not running on " + SCHEDULER_URL };
+    checks.scheduler = {
+      ok: false,
+      detail: "Service not running on " + SCHEDULER_URL,
+      hint: isWindows
+        ? "Start the scheduler service: run `node scripts/install-service-win.js` (one-off) or `node server/scheduler-service.js`."
+        : "Start the scheduler service: `sudo bash scripts/install-service-linux.sh` or `node server/scheduler-service.js`.",
+    };
   }
 
   // --- Summary: what features are available ---

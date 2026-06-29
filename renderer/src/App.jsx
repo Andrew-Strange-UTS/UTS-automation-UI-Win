@@ -48,9 +48,20 @@ export default function App() {
   const [secretsOpen, setSecretsOpen] = useState(false);
   const [availableSecrets, setAvailableSecrets] = useState([]);
   const [patPopupOpen, setPatPopupOpen] = useState(false);
-  const [testType, setTestType] = useState(() =>
-    typeof window !== "undefined" ? localStorage.getItem("testType") || "desktop" : "desktop"
-  );
+  const platform =
+    typeof window !== "undefined" && window.electronAPI?.platform
+      ? window.electronAPI.platform
+      : typeof navigator !== "undefined" && /Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent)
+      ? "linux"
+      : "";
+  const isLinuxPlatform = platform === "linux";
+  const [testType, setTestType] = useState(() => {
+    if (typeof window === "undefined") return "desktop";
+    const saved = localStorage.getItem("testType");
+    // Desktop tests need Windows + PowerShell; default to web on Linux.
+    if (saved) return saved;
+    return platform === "linux" ? "web" : "desktop";
+  });
   useEffect(() => {
     if (typeof window !== "undefined") {
       localStorage.setItem("testType", testType);
@@ -59,6 +70,21 @@ export default function App() {
     setRunSequence([]);
     setTestOptions({});
   }, [testType]);
+
+  // Switch test mode, confirming first if it would discard a non-empty run sequence.
+  const handleSwitchTestType = (target) => {
+    if (target === testType) return;
+    if (target === "desktop" && isLinuxPlatform) return; // desktop unsupported on Linux
+    if (
+      runSequence.length > 0 &&
+      !confirm(
+        `Switching to ${target === "desktop" ? "Desktop" : "Web"} tests will clear your current run sequence (${runSequence.length} test${runSequence.length === 1 ? "" : "s"}). Continue?`
+      )
+    ) {
+      return;
+    }
+    setTestType(target);
+  };
 
   const [privateRepo, setPrivateRepo] = useState(() =>
     typeof window !== "undefined" ? localStorage.getItem("privateRepo") === "true" : false
@@ -739,13 +765,16 @@ export default function App() {
             border: `2px solid ${theme.primary}`,
           }}>
             <button
-              onClick={() => setTestType("desktop")}
+              onClick={() => handleSwitchTestType("desktop")}
+              disabled={isLinuxPlatform}
+              title={isLinuxPlatform ? "Desktop tests require Windows + PowerShell and are not available on Linux." : ""}
               style={{
                 padding: "10px 24px",
                 fontSize: "15px",
                 fontWeight: "bold",
                 border: "none",
-                cursor: "pointer",
+                cursor: isLinuxPlatform ? "not-allowed" : "pointer",
+                opacity: isLinuxPlatform ? 0.5 : 1,
                 backgroundColor: testType === "desktop" ? theme.primary : "#fff",
                 color: testType === "desktop" ? theme.primaryText : theme.primary,
               }}
@@ -753,7 +782,7 @@ export default function App() {
               Desktop Tests
             </button>
             <button
-              onClick={() => setTestType("web")}
+              onClick={() => handleSwitchTestType("web")}
               style={{
                 padding: "10px 24px",
                 fontSize: "15px",
@@ -768,6 +797,11 @@ export default function App() {
               Web Tests
             </button>
           </div>
+          {isLinuxPlatform && (
+            <div style={{ marginTop: "8px", fontSize: "12px", color: "#888" }}>
+              Desktop tests require Windows + PowerShell and are disabled on Linux.
+            </div>
+          )}
         </div>
         {/* Test cards */}
         {loading ? (

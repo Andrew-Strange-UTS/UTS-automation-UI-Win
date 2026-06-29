@@ -83,6 +83,7 @@ export default function StartupChecks({ onDismiss }) {
       info: checks.chrome.ok
         ? `v${checks.chrome.version}${checks.chrome.binary ? ` (${checks.chrome.binary})` : ""}`
         : checks.chrome.detail,
+      warn: checks.chrome.warn,
       required: false,
       feature: "Web tests (Selenium)",
     },
@@ -92,7 +93,7 @@ export default function StartupChecks({ onDismiss }) {
       info: checks.chromedriver.ok
         ? checks.chromedriver.version
         : checks.chromedriver.detail,
-      warn: checks.chromedriver.ok && checks.chromedriver.detail,
+      warn: checks.chromedriver.ok && !!checks.chromedriver.detail,
       required: false,
       feature: "Web tests (Selenium)",
     },
@@ -158,10 +159,10 @@ export default function StartupChecks({ onDismiss }) {
         <tbody>
           {rows.map((row) => (
             <tr key={row.label} style={{ borderBottom: "1px solid #f0f0f0" }}>
-              <td style={{ padding: "10px 12px", width: "50px" }}>
-                <StatusBadge ok={row.check.ok} warn={row.warn && !row.check.ok} />
+              <td style={{ padding: "10px 12px", width: "50px", verticalAlign: "top" }}>
+                <StatusBadge ok={row.check.ok} warn={!!row.warn} />
               </td>
-              <td style={{ padding: "10px 12px", fontWeight: "600", fontSize: "14px" }}>
+              <td style={{ padding: "10px 12px", fontWeight: "600", fontSize: "14px", verticalAlign: "top" }}>
                 {row.label}
                 {row.required && <span style={{ color: theme.primary, marginLeft: "4px", fontSize: "11px" }}>required</span>}
               </td>
@@ -170,6 +171,24 @@ export default function StartupChecks({ onDismiss }) {
                 color: row.check.ok ? "#333" : "#999",
               }}>
                 {row.info}
+                {row.check.hint && (
+                  <div style={{ marginTop: "4px", fontSize: "12px", color: "#8a5300" }}>
+                    {row.check.hint}
+                    {row.check.helpUrl && (
+                      <>
+                        {" "}
+                        <a
+                          href={row.check.helpUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ color: theme.primary, fontWeight: "600" }}
+                        >
+                          Install instructions
+                        </a>
+                      </>
+                    )}
+                  </div>
+                )}
               </td>
             </tr>
           ))}

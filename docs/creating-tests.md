@@ -230,7 +230,7 @@ module.exports = async function (driver, parameters = {}, zephyrLog) {
 | `driver.screenshotWindow(outputPath?, titlePattern)` | Capture only the bounds of the window whose title contains `titlePattern`. Same default location rules as `screenshot`. Throws if the window is not found |
 
 By default every screenshot is saved under `C:\marvin screen shots\` in a subfolder named after the test. Pass an absolute path to any screenshot method to save somewhere specific instead.
-| `driver.readText(region?, options?)` | OCR the screen (or a region) using Tesseract. Returns `{ text, confidence, words: [{ text, confidence, bbox: { x0, y0, x1, y1 } }] }`. Pass `options.window = "Window Title"` (with no `region`) to OCR just that window |
+| `driver.readText(region?, options?)` | OCR the screen (or a region). Uses the built-in Windows OCR engine by default (Tesseract fallback). Returns `{ text, confidence, words: [{ text, confidence, bbox: { x0, y0, x1, y1 } }] }`. Pass `options.window = "Window Title"` (with no `region`) to OCR just that window. See the `readText` options below for `engine`, `psm`, `whitelist` |
 | `driver.findImage(refImage, options?)` | Find a reference image on screen. Returns `{ found, confidence, centerX, centerY, ... }` |
 | `driver.clickImage(refImage, options?)` | Find image and click its centre |
 | `driver.waitForImage(refImage, options?)` | Poll until image appears or timeout |
@@ -307,6 +307,14 @@ Reference images should be small, tightly cropped screenshots of the UI element 
 
 **Options for `readText`:**
 - `lang` — OCR language (default: `"eng"`)
+- `window` — a window title pattern; OCR just that window (use with no `region`)
+- `engine` — `"windows"` (default on Windows: the built-in `Windows.Media.Ocr` engine, no install, best on screen/UI text) or `"tesseract"` (pure-JS, cross-platform). Windows OCR falls back to Tesseract automatically if unavailable.
+- `psm` — Tesseract page-segmentation mode. For grids / scattered UI text pass `11` (sparse) or `6` (single block); default is auto.
+- `whitelist` — restrict recognised characters, e.g. `"0123456789+-*/=."`, which cuts a lot of junk on things like a calculator.
+- `preprocess` — set `true` to upscale + greyscale + normalize before OCR. Helps tiny/soft captures, can add noise to already-clean ones, so it is off by default. `binarize: true` additionally thresholds to black/white.
+
+> Reading buttons or labels that have accessible names (Calculator, standard
+> dialogs, WinForms controls)? Prefer UI Automation: `driver.findControl(window, { name: "Seven" })` and `clickControl` are far more reliable than OCR-ing pixels, since they read the control tree directly.
 
 ### Image OCR Example
 

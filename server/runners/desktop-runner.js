@@ -183,6 +183,39 @@ ${actionLines}
     }
   }
 
+  // Perform `count` clicks at (x, y) in a SINGLE PowerShell process. Multi-click
+  // (double/triple) has to keep the gap between clicks under the Windows
+  // double-click time (~500ms); issuing each click as its own PowerShell process
+  // was far too slow, so Windows saw separate single clicks. options.relativeTo
+  // offsets the coordinates by the given window's top-left.
+  async function multiClick(x, y, count, button = "left", options = {}) {
+    if (options.relativeTo) {
+      const rect = await getWindowRect(options.relativeTo);
+      x += rect.x;
+      y += rect.y;
+    }
+    const btnDown = button === "right" ? "0x0008" : "0x0002";
+    const btnUp = button === "right" ? "0x0010" : "0x0004";
+    const gap = options.gapMs != null ? options.gapMs : 60;
+    await runPowerShell(`
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class MultiClickOps {
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, int dwExtraInfo);
+}
+"@
+[MultiClickOps]::SetCursorPos(${x}, ${y});
+Start-Sleep -Milliseconds 80;
+for ($i = 0; $i -lt ${count}; $i++) {
+  [MultiClickOps]::mouse_event(${btnDown}, 0, 0, 0, 0);
+  [MultiClickOps]::mouse_event(${btnUp}, 0, 0, 0, 0);
+  if ($i -lt (${count} - 1)) { Start-Sleep -Milliseconds ${gap} }
+}
+`);
+  }
+
   const driver = {
     // --- Keyboard ---
     async type(text) {
@@ -272,22 +305,24 @@ Start-Sleep -Milliseconds 100;
 `);
     },
 
-    async doubleClick(x, y) {
-      await driver.mouseClick(x, y);
-      await driver.pause(100);
-      await driver.mouseClick(x, y);
+    // Double-click at (x, y). Both clicks fire in one process so Windows
+    // registers them as a double-click. options: { button, relativeTo, gapMs }.
+    async doubleClick(x, y, options = {}) {
+      await multiClick(x, y, 2, options.button || "left", options);
     },
 
-    async tripleClick(x, y) {
-      await driver.mouseClick(x, y);
-      await driver.pause(80);
-      await driver.mouseClick(x, y);
-      await driver.pause(80);
-      await driver.mouseClick(x, y);
+    // Triple-click at (x, y) — selects a whole line/paragraph in most apps.
+    async tripleClick(x, y, options = {}) {
+      await multiClick(x, y, 3, options.button || "left", options);
     },
 
     // Click while holding Shift — used for range-selecting text from a prior click to (x, y).
-    async shiftClick(x, y, button = "left") {
+    async shiftClick(x, y, button = "left", options = {}) {
+      if (options.relativeTo) {
+        const rect = await getWindowRect(options.relativeTo);
+        x += rect.x;
+        y += rect.y;
+      }
       const btnDown = button === "right" ? "0x0008" : "0x0002";
       const btnUp = button === "right" ? "0x0010" : "0x0004";
       // VK_SHIFT = 0x10, KEYEVENTF_KEYUP = 0x0002

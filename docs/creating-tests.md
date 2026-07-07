@@ -211,9 +211,9 @@ module.exports = async function (driver, parameters = {}, zephyrLog) {
 | `driver.hotkey(modifier, key)` | Shortcut for combos like `hotkey("Ctrl", "a")` |
 | `driver.mouseMove(x, y, options?)` | Move cursor to screen coordinates. Pass `{ relativeTo: "Window Title" }` to treat `x`/`y` as offsets from that window's top-left corner |
 | `driver.mouseClick(x, y, button?, options?)` | Click at coordinates. `button` is `"left"` (default) or `"right"`. Pass `{ relativeTo: "Window Title" }` to use window-relative coordinates |
-| `driver.doubleClick(x, y)` | Double-click at coordinates — selects the word under the cursor in most apps |
-| `driver.tripleClick(x, y)` | Triple-click at coordinates — selects the whole line/paragraph in most apps |
-| `driver.shiftClick(x, y, button?)` | Click while holding Shift. Combine with a prior `mouseClick` to range-select text from the first click point to here |
+| `driver.doubleClick(x, y, options?)` | Double-click at coordinates (selects the word under the cursor in most apps). Both clicks fire in one pass so Windows registers a real double-click. Options: `button`, `relativeTo`, `gapMs` |
+| `driver.tripleClick(x, y, options?)` | Triple-click at coordinates (selects the whole line/paragraph in most apps). Same options as `doubleClick` |
+| `driver.shiftClick(x, y, button?, options?)` | Click while holding Shift. Combine with a prior `mouseClick` to range-select text from the first click point to here. Pass `{ relativeTo: "Window Title" }` for window-relative coordinates |
 | `driver.drag({ from, to }, options?)` | Click-and-drag: press the left button at `from = { x, y }`, step the cursor along the path (so apps like Paint register a continuous stroke), then release. Options: `relativeTo: "Window Title"` for window-relative coordinates, `steps` (path points, default scales with distance), `stepDelayMs` (default 15) |
 | `driver.scroll(x, y, delta, options?)` | Scroll the mouse wheel at `(x, y)`. `delta` is a small integer (positive scrolls up, negative down). Pass `{ relativeTo: "Window Title" }` for window-relative coordinates |
 | `driver.findWindow(titlePattern)` | Find a window by partial title match, returns window handle |

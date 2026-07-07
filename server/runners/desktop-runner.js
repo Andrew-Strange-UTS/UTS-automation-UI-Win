@@ -229,6 +229,7 @@ function Await($op, $type) { $t = $asTaskGeneric.MakeGenericMethod($type).Invoke
 [void][Windows.Storage.Streams.IRandomAccessStream,Windows.Storage.Streams,ContentType=WindowsRuntime]
 [void][Windows.Graphics.Imaging.BitmapDecoder,Windows.Graphics.Imaging,ContentType=WindowsRuntime]
 [void][Windows.Graphics.Imaging.SoftwareBitmap,Windows.Graphics.Imaging,ContentType=WindowsRuntime]
+[void][Windows.Globalization.Language,Windows.Globalization,ContentType=WindowsRuntime]
 [void][Windows.Media.Ocr.OcrEngine,Windows.Media.Ocr,ContentType=WindowsRuntime]
 $path = '${psPath(imagePath)}'
 $file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($path)) ([Windows.Storage.StorageFile])
@@ -265,7 +266,8 @@ foreach ($line in $result.Lines) { foreach ($w in $line.Words) { $r = $w.Boundin
       try {
         return await ocrWindowsNative(imagePath, options);
       } catch (err) {
-        process.stdout.write(`[ocr] Windows OCR unavailable (${(err && err.message || err).toString().slice(0, 120)}); falling back to Tesseract\n`);
+        process.stdout.write(`[ocr] Windows OCR failed, falling back to Tesseract. Full error:\n${(err && err.message || err).toString()}\n`);
+        if (options.engine === "windows") throw err; // caller explicitly demanded Windows OCR
       }
     }
     return await ocrFromImage(imagePath, options);

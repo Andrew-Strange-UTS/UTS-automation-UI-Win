@@ -411,37 +411,46 @@ Start-Sleep -Milliseconds 60
         toX += rect.x;
         toY += rect.y;
       }
-      // A drag is a press, then the cursor stepped through intermediate points
-      // with the button held, then a release. Apps like Paint sample mouse-move
-      // events during the hold, so a single teleport from->to draws nothing;
-      // interpolating the path (and nudging with MOUSEEVENTF_MOVE at each step)
-      // is what makes the stroke register.
+      // A drag is a press, the cursor stepped through the path with the button
+      // held, then a release. ALL motion is injected as absolute SendInput moves
+      // (MOUSEEVENTF_MOVE|ABSOLUTE|VIRTUALDESK) rather than SetCursorPos: apps
+      // like Paint track the injected input stream during the hold, and won't
+      // register SetCursorPos moves as a drag, so nothing was drawn before.
       const dist = Math.hypot(toX - fromX, toY - fromY);
-      const steps = Math.max(10, Math.min(80, options.steps || Math.round(dist / 10)));
-      const stepDelay = options.stepDelayMs != null ? options.stepDelayMs : 15;
+      const steps = Math.max(15, Math.min(120, options.steps || Math.round(dist / 6)));
+      const stepDelay = options.stepDelayMs != null ? options.stepDelayMs : 12;
       await runPowerShell(`
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 public class DragOps {
-    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, int dwExtraInfo);
+    [DllImport("user32.dll")] public static extern int GetSystemMetrics(int nIndex);
 }
 "@
+# Virtual-desktop bounds, so absolute coords are correct across multiple monitors.
+$vx = [DragOps]::GetSystemMetrics(76); $vy = [DragOps]::GetSystemMetrics(77);
+$vw = [DragOps]::GetSystemMetrics(78); $vh = [DragOps]::GetSystemMetrics(79);
+function AbsMove([int]$x, [int]$y) {
+  $ax = [int][math]::Round((($x - $vx) * 65535.0) / ($vw - 1));
+  $ay = [int][math]::Round((($y - $vy) * 65535.0) / ($vh - 1));
+  # MOUSEEVENTF_MOVE|ABSOLUTE|VIRTUALDESK = 0x0001|0x8000|0x4000 = 0xC001
+  [DragOps]::mouse_event(0xC001, $ax, $ay, 0, 0);
+}
 $fromX = ${fromX}; $fromY = ${fromY}; $toX = ${toX}; $toY = ${toY}; $steps = ${steps};
-# MOUSEEVENTF_MOVE = 0x0001, MOUSEEVENTF_LEFTDOWN = 0x0002, MOUSEEVENTF_LEFTUP = 0x0004
-[DragOps]::SetCursorPos($fromX, $fromY);
-Start-Sleep -Milliseconds 120;
+AbsMove $fromX $fromY;
+Start-Sleep -Milliseconds 150;
+# MOUSEEVENTF_LEFTDOWN = 0x0002
 [DragOps]::mouse_event(0x0002, 0, 0, 0, 0);
-Start-Sleep -Milliseconds 120;
+Start-Sleep -Milliseconds 150;
 for ($i = 1; $i -le $steps; $i++) {
   $x = [int]($fromX + (($toX - $fromX) * $i / $steps));
   $y = [int]($fromY + (($toY - $fromY) * $i / $steps));
-  [DragOps]::SetCursorPos($x, $y);
-  [DragOps]::mouse_event(0x0001, 0, 0, 0, 0);
+  AbsMove $x $y;
   Start-Sleep -Milliseconds ${stepDelay};
 }
-Start-Sleep -Milliseconds 120;
+Start-Sleep -Milliseconds 150;
+# MOUSEEVENTF_LEFTUP = 0x0004
 [DragOps]::mouse_event(0x0004, 0, 0, 0, 0);
 `);
     },

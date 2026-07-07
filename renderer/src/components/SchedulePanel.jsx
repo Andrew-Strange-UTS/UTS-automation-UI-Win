@@ -351,7 +351,8 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
   return (
     <div
       style={{
-        width: "1400px",
+        width: "100%",
+        maxWidth: "1400px",
         margin: "30px auto",
         backgroundColor: "#fafafa",
         borderRadius: "10px",

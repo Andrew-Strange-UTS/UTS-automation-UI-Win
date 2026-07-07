@@ -152,7 +152,7 @@ const ZEPHYR_TOKEN = ${JSON.stringify(zephyrToken)};
 function log(msg) { process.stdout.write(msg + "\\n"); }
 // EPEA-2514: capture a screenshot at the moment a step fails, save it under the
 // per-run failures/ folder, and emit a marker the log viewer renders as a thumbnail.
-async function captureFailureScreenshot(testName) {
+async function captureFailureScreenshot(driver, testName) {
   try {
     if (!fs.existsSync(FAILURE_DIR)) fs.mkdirSync(FAILURE_DIR, { recursive: true });
     const safe = String(testName).replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -231,7 +231,7 @@ ${driverSetupCode}
         failedCount++;
         console.error("❌ Step #" + (i + 1) + " [" + testName + "] failed:", stepError && stepError.stack || stepError);
         zephyrLog("ERROR: " + (stepError && stepError.message || stepError), "Fail");
-        await captureFailureScreenshot(testName);
+        await captureFailureScreenshot(driver, testName);
         await sendZephyrResult(zephyrConfig, "Fail", zephyrStepResults);
       }
     }

@@ -216,6 +216,61 @@ for ($i = 0; $i -lt ${count}; $i++) {
 `);
   }
 
+  // OCR an image file with the Windows built-in engine (Windows.Media.Ocr). It
+  // needs no install, is on every Windows 10/11 box, and is markedly better than
+  // Tesseract on screen/UI text. Returns the same shape as ocrFromImage. Windows
+  // OCR does not expose per-word confidence, so confidences are nominal.
+  async function ocrWindowsNative(imagePath, options = {}) {
+    const script = `
+Add-Type -AssemblyName System.Runtime.WindowsRuntime | Out-Null
+$asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation\`1' })[0]
+function Await($op, $type) { $t = $asTaskGeneric.MakeGenericMethod($type).Invoke($null, @($op)); $t.Wait(-1) | Out-Null; $t.Result }
+[void][Windows.Storage.StorageFile,Windows.Storage,ContentType=WindowsRuntime]
+[void][Windows.Storage.Streams.IRandomAccessStream,Windows.Storage.Streams,ContentType=WindowsRuntime]
+[void][Windows.Graphics.Imaging.BitmapDecoder,Windows.Graphics.Imaging,ContentType=WindowsRuntime]
+[void][Windows.Graphics.Imaging.SoftwareBitmap,Windows.Graphics.Imaging,ContentType=WindowsRuntime]
+[void][Windows.Media.Ocr.OcrEngine,Windows.Media.Ocr,ContentType=WindowsRuntime]
+$path = '${psPath(imagePath)}'
+$file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($path)) ([Windows.Storage.StorageFile])
+$stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+$decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+$bitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+$bitmap = [Windows.Graphics.Imaging.SoftwareBitmap]::Convert($bitmap, [Windows.Graphics.Imaging.BitmapPixelFormat]::Bgra8, [Windows.Graphics.Imaging.BitmapAlphaMode]::Premultiplied)
+${options.lang ? `$engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage((New-Object Windows.Globalization.Language('${psEscape(options.lang)}')))` : `$engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()`}
+if ($null -eq $engine) { throw 'No OCR language pack available' }
+$result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+$words = New-Object System.Collections.ArrayList
+foreach ($line in $result.Lines) { foreach ($w in $line.Words) { $r = $w.BoundingRect; [void]$words.Add([pscustomobject]@{ text = $w.Text; x0 = [int]$r.X; y0 = [int]$r.Y; x1 = [int]($r.X + $r.Width); y1 = [int]($r.Y + $r.Height) }) } }
+[pscustomobject]@{ text = $result.Text; words = $words } | ConvertTo-Json -Depth 5 -Compress
+`;
+    const raw = await runPowerShell(script);
+    const parsed = JSON.parse(raw);
+    const wordsArr = Array.isArray(parsed.words) ? parsed.words : (parsed.words ? [parsed.words] : []);
+    return {
+      text: (parsed.text || "").trim(),
+      confidence: 90, // Windows OCR does not report confidence; nominal value
+      words: wordsArr.map((w) => ({
+        text: w.text,
+        confidence: 90,
+        bbox: { x0: w.x0, y0: w.y0, x1: w.x1, y1: w.y1 },
+      })),
+    };
+  }
+
+  // Run OCR with the selected engine. Default on Windows is the native engine,
+  // falling back to Tesseract if it errors; elsewhere Tesseract is used.
+  async function ocrImage(imagePath, options = {}) {
+    const engine = options.engine || (process.platform === "win32" ? "windows" : "tesseract");
+    if (engine === "windows") {
+      try {
+        return await ocrWindowsNative(imagePath, options);
+      } catch (err) {
+        process.stdout.write(`[ocr] Windows OCR unavailable (${(err && err.message || err).toString().slice(0, 120)}); falling back to Tesseract\n`);
+      }
+    }
+    return await ocrFromImage(imagePath, options);
+  }
+
   const driver = {
     // --- Keyboard ---
     async type(text) {
@@ -638,7 +693,7 @@ $bitmap.Dispose();
         const tmpWindow = path.join(os.tmpdir(), `marvin-window-ocr-${Date.now()}.png`);
         try {
           await driver.screenshotWindow(tmpWindow, options.window);
-          return await ocrFromImage(tmpWindow, options);
+          return await ocrImage(tmpWindow, options);
         } finally {
           try { fs.unlinkSync(tmpWindow); } catch {}
         }
@@ -651,7 +706,7 @@ $bitmap.Dispose();
           await cropAndSave(tmpFile, region, croppedPath);
           imageInput = croppedPath;
         }
-        const result = await ocrFromImage(imageInput, options);
+        const result = await ocrImage(imageInput, options);
         // Clean up cropped file
         if (region) {
           try { fs.unlinkSync(imageInput); } catch {}

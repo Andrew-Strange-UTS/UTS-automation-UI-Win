@@ -49,8 +49,40 @@ async function cropAndSave(screenshotPath, region, outputPath) {
 async function ocrFromImage(imagePathOrBuffer, options = {}) {
   const lang = options.lang || "eng";
   const worker = await getWorker(lang);
+
+  // Opt-in preprocessing (upscale + greyscale + normalize) for small/soft
+  // captures. It helps tiny text but can add noise to already-clean images, so
+  // it is off by default; pass { preprocess: true } to enable.
+  let input = imagePathOrBuffer;
+  if (options.preprocess) {
+    try {
+      const img = await Jimp.read(imagePathOrBuffer);
+      const longSide = Math.max(img.width, img.height);
+      const targetLong = options.targetSize || 1600;
+      const factor = longSide > 0 && longSide < targetLong
+        ? Math.min(4, targetLong / longSide)
+        : 1;
+      if (factor > 1.01) img.scale(factor);
+      img.greyscale();
+      img.normalize();
+      img.contrast(0.3);
+      if (options.binarize) img.threshold({ max: options.binarizeLevel || 160 });
+      input = await img.getBuffer("image/png");
+    } catch (e) {
+      input = imagePathOrBuffer; // any preprocessing failure falls back to the original
+    }
+  }
+
+  // Page-segmentation mode + optional character whitelist. Default AUTO; for
+  // grids/sparse UI text pass { psm: 11 } (SPARSE_TEXT), and a whitelist like
+  // "0123456789+-*/=." to cut junk.
+  await worker.setParameters({
+    tessedit_pageseg_mode: options.psm != null ? String(options.psm) : "3",
+    tessedit_char_whitelist: options.whitelist || "",
+  });
+
   // Pass `blocks: true` so word-level data is included in the result.
-  const result = await worker.recognize(imagePathOrBuffer, {}, { blocks: true });
+  const result = await worker.recognize(input, {}, { blocks: true });
 
   // Find words at the top level (old API) or flatten from blocks (new API).
   let words = result.data.words;

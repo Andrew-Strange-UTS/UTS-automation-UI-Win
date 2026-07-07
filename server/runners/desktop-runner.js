@@ -404,36 +404,39 @@ Start-Sleep -Milliseconds 60
       let fromY = from.y;
       let toX = to.x;
       let toY = to.y;
+      let rectInfo = "none";
       if (options.relativeTo) {
         const rect = await getWindowRect(options.relativeTo);
+        rectInfo = `${rect.x},${rect.y} ${rect.width}x${rect.height}`;
         fromX += rect.x;
         fromY += rect.y;
         toX += rect.x;
         toY += rect.y;
       }
-      // A drag is a press, the cursor physically stepped along the path with the
-      // button held, then a release. The cursor is moved with SetCursorPos (the
-      // primitive that actually moves the pointer on this machine) AND each step
-      // also emits a relative mouse_event MOVE carrying the real delta, so the
-      // move is present in the input stream that apps like Paint track for
-      // drawing. Moving the pointer only via absolute mouse_event did not visibly
-      // move the cursor here; SetCursorPos does.
       const dist = Math.hypot(toX - fromX, toY - fromY);
       const steps = Math.max(15, Math.min(120, options.steps || Math.round(dist / 6)));
       const stepDelay = options.stepDelayMs != null ? options.stepDelayMs : 12;
-      await runPowerShell(`
+      // Reports GetCursorPos before/after so we can see whether the cursor
+      // actually moves and whether the target coordinates are on-screen.
+      const out = await runPowerShell(`
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 public class DragOps {
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
     [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, int dwExtraInfo);
+    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
 }
 "@
+Add-Type -AssemblyName System.Windows.Forms;
+$scr = [System.Windows.Forms.SystemInformation]::VirtualScreen;
+$p = New-Object DragOps+POINT;
 $fromX = ${fromX}; $fromY = ${fromY}; $toX = ${toX}; $toY = ${toY}; $steps = ${steps};
-# MOUSEEVENTF_MOVE = 0x0001, LEFTDOWN = 0x0002, LEFTUP = 0x0004
-[DragOps]::SetCursorPos($fromX, $fromY);
+[DragOps]::GetCursorPos([ref]$p) | Out-Null; Write-Output ("screen=$($scr.X),$($scr.Y) $($scr.Width)x$($scr.Height) startCursor=$($p.X),$($p.Y) from=$fromX,$fromY to=$toX,$toY");
+$ok = [DragOps]::SetCursorPos($fromX, $fromY);
 Start-Sleep -Milliseconds 150;
+[DragOps]::GetCursorPos([ref]$p) | Out-Null; Write-Output ("SetCursorPos returned=$ok afterMoveToFrom=$($p.X),$($p.Y)");
 [DragOps]::mouse_event(0x0002, 0, 0, 0, 0);
 Start-Sleep -Milliseconds 150;
 $prevX = $fromX; $prevY = $fromY;
@@ -442,13 +445,15 @@ for ($i = 1; $i -le $steps; $i++) {
   $y = [int]($fromY + (($toY - $fromY) * $i / $steps));
   $dx = $x - $prevX; $dy = $y - $prevY;
   [DragOps]::mouse_event(0x0001, $dx, $dy, 0, 0);
-  [DragOps]::SetCursorPos($x, $y);
+  [DragOps]::SetCursorPos($x, $y) | Out-Null;
   $prevX = $x; $prevY = $y;
   Start-Sleep -Milliseconds ${stepDelay};
 }
 Start-Sleep -Milliseconds 150;
+[DragOps]::GetCursorPos([ref]$p) | Out-Null; Write-Output ("afterDrag=$($p.X),$($p.Y)");
 [DragOps]::mouse_event(0x0004, 0, 0, 0, 0);
 `);
+      process.stdout.write(`[drag diag] relativeTo rect=${rectInfo} | ${String(out).replace(/\r?\n/g, " | ")}\n`);
     },
 
     // Scroll the mouse wheel at (x, y). `delta` is a small integer: positive

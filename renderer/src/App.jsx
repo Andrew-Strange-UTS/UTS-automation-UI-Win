@@ -263,7 +263,11 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ repoUrl, privateRepo }),
       });
-      if (!res.ok) throw new Error(`Failed to clone repo (HTTP ${res.status})`);
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try { const e = await res.json(); if (e && e.error) msg = e.error; } catch {}
+        throw new Error(msg);
+      }
       const listRes = await fetch(`${BACKEND_URL}/api/git/list`);
       const data = await listRes.json();
       setTests(data);

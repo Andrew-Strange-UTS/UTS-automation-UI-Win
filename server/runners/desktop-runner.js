@@ -47,6 +47,40 @@ function createDesktopDriver(options = {}) {
     throw new Error(`Relative image path "${ref}" but no imagesDir configured. Use an absolute path or ensure your test has an images/ folder.`);
   }
 
+  // Default folder that screenshots are saved into, one folder per test:
+  //   C:\marvin screen shots\<test name>   (Windows)
+  // Overridable via context.screenshotsDir. On non-Windows hosts a home-dir
+  // fallback is used so dev/test runs still work.
+  function getScreenshotsDir() {
+    if (context.screenshotsDir) return context.screenshotsDir;
+    const root = process.platform === "win32"
+      ? "C:\\marvin screen shots"
+      : path.join(os.homedir() || os.tmpdir(), "marvin screen shots");
+    return path.join(root, context.testName || "unnamed-test");
+  }
+
+  // Decide where a screenshot is written. An absolute path is honored as-is
+  // (used internally for temp and failure captures). A relative path or bare
+  // filename lands in the default per-test folder; omitting it generates a
+  // timestamped name. The destination directory is created if missing.
+  function resolveScreenshotPath(outputPath) {
+    let target;
+    if (outputPath && path.isAbsolute(outputPath)) {
+      target = outputPath;
+    } else {
+      const name = outputPath ? path.basename(outputPath) : `screenshot-${Date.now()}.png`;
+      target = path.join(getScreenshotsDir(), name);
+    }
+    try { fs.mkdirSync(path.dirname(target), { recursive: true }); } catch {}
+    return target;
+  }
+
+  // Escape a path for embedding inside a PowerShell single-quoted string
+  // (only single quotes need doubling; backslashes are literal there).
+  function psPath(p) {
+    return String(p).replace(/'/g, "''");
+  }
+
   // Take a full-screen screenshot to a temp file and return its path
   async function takeTempScreenshot() {
     const tmpFile = path.join(os.tmpdir(), `marvin-screenshot-${Date.now()}.png`);
@@ -470,6 +504,7 @@ ${lookup}
     },
 
     async screenshot(outputPath) {
+      outputPath = resolveScreenshotPath(outputPath);
       await runPowerShell(`
 Add-Type -AssemblyName System.Windows.Forms;
 Add-Type -AssemblyName System.Drawing;
@@ -478,17 +513,19 @@ $bitmap = New-Object System.Drawing.Bitmap($screen.Width, $screen.Height);
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap);
 try {
   $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size);
-  $bitmap.Save('${outputPath}');
+  $bitmap.Save('${psPath(outputPath)}');
 } finally {
   $graphics.Dispose();
   $bitmap.Dispose();
 }
 `);
+      return outputPath;
     },
 
     // Capture only the bounds of the window whose MainWindowTitle contains
     // titlePattern, saving to outputPath. Throws if the window is not found.
     async screenshotWindow(outputPath, titlePattern) {
+      outputPath = resolveScreenshotPath(outputPath);
       const escaped = psEscape(titlePattern);
       await runPowerShell(`
 Add-Type -AssemblyName System.Windows.Forms;
@@ -512,7 +549,7 @@ if ($width -le 0 -or $height -le 0) { throw "Window matching '${escaped}' has no
 $bitmap = New-Object System.Drawing.Bitmap($width, $height);
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap);
 $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size);
-$bitmap.Save('${outputPath.replace(/\\/g, "\\\\")}');
+$bitmap.Save('${psPath(outputPath)}');
 $graphics.Dispose();
 $bitmap.Dispose();
 `);
@@ -521,6 +558,7 @@ $bitmap.Dispose();
 
     // --- Image: Screenshot region ---
     async screenshotRegion(outputPath, region) {
+      outputPath = resolveScreenshotPath(outputPath);
       const tmpFile = await takeTempScreenshot();
       try {
         await cropAndSave(tmpFile, region, outputPath);

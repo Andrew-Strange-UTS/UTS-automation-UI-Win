@@ -215,6 +215,7 @@ ${driverSetupCode}
       try {
         if (typeof driverContext !== "undefined") {
           driverContext.imagesDir = path.join(${JSON.stringify(TESTS_ROOT)}, testName, "images");
+          driverContext.testName = testName;
         }
         console.log("▶ Running step #" + (i + 1) + " [" + testName + "]");
         await fn(driver, testParams, zephyrLog);

@@ -23,6 +23,18 @@ function getGithubUsername() {
   return getSecret("GITHUB_USERNAME") || null;
 }
 
+// Remove a directory, retrying through transient Windows locks (EBUSY/EPERM)
+// that a just-finished test run can briefly hold on its artifacts.
+function robustRemove(target) {
+  if (!fs.existsSync(target)) return true;
+  try {
+    fs.rmSync(target, { recursive: true, force: true, maxRetries: 12, retryDelay: 250 });
+  } catch (err) {
+    console.warn(`Could not fully remove ${target}: ${err.code || err.message}`);
+  }
+  return !fs.existsSync(target);
+}
+
 async function cloneTestRepo(req, res) {
   const { repoUrl, privateRepo } = req.body;
   const repoUrlClean = (repoUrl || "").trim();
@@ -32,9 +44,6 @@ async function cloneTestRepo(req, res) {
     return res.status(400).json({ error: "Repository URL is required" });
   }
   try {
-    if (fs.existsSync(CLONE_TARGET)) {
-      fs.rmSync(CLONE_TARGET, { recursive: true, force: true });
-    }
     let urlToClone = repoUrlClean;
     if (isPrivate) {
       const PAT = getPersonalAccessToken();
@@ -54,12 +63,29 @@ async function cloneTestRepo(req, res) {
       console.log("CLONE (public):", urlToClone);
     }
     const git = simpleGit();
-    console.log(`Cloning ${urlToClone} into ${CLONE_TARGET}...`);
-    await git.clone(urlToClone, CLONE_TARGET);
+
+    // Try to clear the existing repo folder. If a leftover test-run artifact is
+    // still locked by the OS, clone into a fresh temp folder and swap it in so
+    // the refresh does not fail outright.
+    if (robustRemove(CLONE_TARGET)) {
+      console.log(`Cloning ${urlToClone} into ${CLONE_TARGET}...`);
+      await git.clone(urlToClone, CLONE_TARGET);
+    } else {
+      const tmpTarget = `${CLONE_TARGET}-new-${Date.now()}`;
+      console.warn(`${CLONE_TARGET} is locked; cloning into ${tmpTarget} and swapping.`);
+      await git.clone(urlToClone, tmpTarget);
+      if (!robustRemove(CLONE_TARGET)) {
+        robustRemove(tmpTarget);
+        throw new Error(
+          "The tests folder is locked by another process (e.g. a running test or antivirus). Close any running tests and try again."
+        );
+      }
+      fs.renameSync(tmpTarget, CLONE_TARGET);
+    }
     return res.json({ message: "Repo cloned successfully" });
   } catch (error) {
     console.error("❌ Failed to clone repo:", error);
-    return res.status(500).json({ error: "Failed to clone repo" });
+    return res.status(500).json({ error: `Failed to clone repo: ${(error && error.message) || error}` });
   }
 }
 

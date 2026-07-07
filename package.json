@@ -1,7 +1,8 @@
 {
   "name": "marvin",
   "version": "1.0.0",
-  "description": "Marvin — Desktop and Web Test Automation",
+  "description": "Marvin - Desktop and Web Test Automation",
+  "author": "UTS",
   "main": "main/main.js",
   "scripts": {
     "start": "electron .",

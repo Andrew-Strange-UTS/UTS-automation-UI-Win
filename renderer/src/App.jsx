@@ -45,7 +45,42 @@ export default function App() {
   const [testOptions, setTestOptions] = useState({});
   const [testResults, setTestResults] = useState({});
   const [serverSideLogs, setServerSideLogs] = useState({});
-  const [isServerLogExpanded, setIsServerLogExpanded] = useState(false);
+  // Which log panel is visible: "server", "marvin", or null. Only one at a time.
+  const [openLogPanel, setOpenLogPanel] = useState(null);
+  const [marvinLogs, setMarvinLogs] = useState("");
+  const marvinLogRef = useRef("");
+  // Capture Marvin's own (renderer) console output and errors so they can be
+  // viewed in the UI the same way as the server-side test logs.
+  useEffect(() => {
+    const levels = ["log", "info", "warn", "error"];
+    const original = {};
+    const fmt = (a) => {
+      if (typeof a === "string") return a;
+      if (a instanceof Error) return a.stack || a.message;
+      try { return JSON.stringify(a); } catch { return String(a); }
+    };
+    const append = (level, args) => {
+      const line = `[${new Date().toLocaleTimeString()}] ${level.toUpperCase()}: ${args.map(fmt).join(" ")}`;
+      marvinLogRef.current = (marvinLogRef.current + line + "\n").slice(-100000);
+    };
+    levels.forEach((l) => {
+      original[l] = console[l];
+      console[l] = (...args) => { append(l, args); original[l](...args); };
+    });
+    const onError = (e) => append("error", [`${e.message} (${e.filename || "?"}:${e.lineno || 0})`]);
+    const onRejection = (e) => append("error", ["Unhandled promise rejection:", (e.reason && (e.reason.stack || e.reason.message)) || e.reason]);
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onRejection);
+    const flush = setInterval(() => {
+      setMarvinLogs((prev) => (prev === marvinLogRef.current ? prev : marvinLogRef.current));
+    }, 400);
+    return () => {
+      levels.forEach((l) => { console[l] = original[l]; });
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onRejection);
+      clearInterval(flush);
+    };
+  }, []);
   const [secretsOpen, setSecretsOpen] = useState(false);
   const [availableSecrets, setAvailableSecrets] = useState([]);
   const [patPopupOpen, setPatPopupOpen] = useState(false);
@@ -228,10 +263,15 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ repoUrl, privateRepo }),
       });
-      if (!res.ok) throw new Error("Failed to clone repo");
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try { const e = await res.json(); if (e && e.error) msg = e.error; } catch {}
+        throw new Error(msg);
+      }
       const listRes = await fetch(`${BACKEND_URL}/api/git/list`);
       const data = await listRes.json();
       setTests(data);
+      console.log(`Refresh Tests: found ${Array.isArray(data) ? data.length : 0} test folder(s)`);
       const filesMap = {};
       for (const testName of data) {
         const possibleFiles = ["run.js", "run.py"];
@@ -262,6 +302,7 @@ export default function App() {
       }
       setFiles(filesMap);
     } catch (err) {
+      console.error("Refresh Tests failed:", (err && err.message) || err);
       setTests([]);
     } finally {
       setLoading(false);
@@ -349,7 +390,7 @@ export default function App() {
     currentStepRef.current = null;
     setServerSideLogs({ ...logsByKey });
     setTestResults(resultsByTest || {});
-    setIsServerLogExpanded(true);
+    setOpenLogPanel("server");
   };
   const hiddenTests = [
     "OKTA-Prod-Login",
@@ -594,6 +635,7 @@ export default function App() {
   return (
     <div style={{ display: "flex" }}>
       <div style={{ flex: 1, minWidth: 0, padding: "20px", overflow: "hidden" }}>
+        <div style={{ width: "80%", margin: "0 auto" }}>
         <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "20px", marginBottom: "8px" }}>
           <h1 style={{ margin: 0, fontSize: "42px" }}>Marvin</h1>
           <img
@@ -685,34 +727,62 @@ export default function App() {
           }}
         >
 
-          <button
-            onClick={() => setIsServerLogExpanded((prev) => !prev)}
-            style={{
-              padding: "10px 20px",
-              fontWeight: "bold",
-              backgroundColor: theme.primary,
-              color: theme.primaryText,
-              border: "none",
-              borderRadius: "5px",
-              cursor: "pointer",
-              marginBottom: "10px",
-            }}
-          >
-            {isServerLogExpanded
-              ? "Hide Server-side Test Logs"
-              : "Show Server-side Test Logs"}
-          </button>
-          {isServerLogExpanded && (
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "10px" }}>
+            <button
+              onClick={() => setOpenLogPanel((prev) => (prev === "server" ? null : "server"))}
+              style={{
+                padding: "10px 20px",
+                fontWeight: "bold",
+                backgroundColor: openLogPanel === "server" ? theme.primary : "#fff",
+                color: openLogPanel === "server" ? theme.primaryText : theme.primary,
+                border: `2px solid ${theme.primary}`,
+                borderRadius: "5px",
+                cursor: "pointer",
+              }}
+            >
+              {openLogPanel === "server"
+                ? "Hide Server-side Test Logs"
+                : "Show Server-side Test Logs"}
+            </button>
+            <button
+              onClick={() => setOpenLogPanel((prev) => (prev === "marvin" ? null : "marvin"))}
+              style={{
+                padding: "10px 20px",
+                fontWeight: "bold",
+                backgroundColor: openLogPanel === "marvin" ? theme.primary : "#fff",
+                color: openLogPanel === "marvin" ? theme.primaryText : theme.primary,
+                border: `2px solid ${theme.primary}`,
+                borderRadius: "5px",
+                cursor: "pointer",
+              }}
+            >
+              {openLogPanel === "marvin" ? "Hide Marvin logs" : "Show Marvin logs"}
+            </button>
+          </div>
+          {openLogPanel === "server" && (
             <div style={{ marginTop: "20px" }}>
-              {Object.entries(serverSideLogs).map(([name, log]) => (
-                <LogGroup
-                  key={name}
-                  title={name}
-                  defaultCollapsed={name !== "[SEQUENCE]" && name !== "[DRY RUN]"}
-                >
-                  <LogContent log={log} />
-                </LogGroup>
-              ))}
+              {Object.keys(serverSideLogs).length === 0 ? (
+                <p style={{ fontStyle: "italic", color: "#888" }}>No test logs yet. Run a sequence or a dry run.</p>
+              ) : (
+                Object.entries(serverSideLogs).map(([name, log]) => (
+                  <LogGroup
+                    key={name}
+                    title={name}
+                    defaultCollapsed={name !== "[SEQUENCE]" && name !== "[DRY RUN]"}
+                  >
+                    <LogContent log={log} />
+                  </LogGroup>
+                ))
+              )}
+            </div>
+          )}
+          {openLogPanel === "marvin" && (
+            <div style={{ marginTop: "20px" }}>
+              <LogGroup title="Marvin (app) logs" defaultCollapsed={false}>
+                <pre style={{ margin: 0, padding: 15, whiteSpace: "pre-wrap", fontSize: "13px", maxHeight: "500px", overflowY: "auto" }}>
+                  {marvinLogs || "No Marvin logs captured yet. Interact with the app (e.g. Refresh Tests) to see activity."}
+                </pre>
+              </LogGroup>
             </div>
           )}
         </div>
@@ -911,6 +981,7 @@ export default function App() {
             />
           ))
         )}
+        </div>
       </div>
       {/* Execution sidebar */}
       <RunSequence

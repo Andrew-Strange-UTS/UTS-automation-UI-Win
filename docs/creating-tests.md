@@ -225,9 +225,11 @@ module.exports = async function (driver, parameters = {}, zephyrLog) {
 | `driver.pause(ms)` | Wait for the given number of milliseconds |
 | `driver.setClipboard(text)` | Set the Windows clipboard contents to `text` |
 | `driver.getClipboard()` | Return the current Windows clipboard text |
-| `driver.screenshot(outputPath)` | Take a screenshot and save to the given path |
-| `driver.screenshotRegion(outputPath, region)` | Save a cropped region — `region = { x, y, width, height }` |
-| `driver.screenshotWindow(outputPath, titlePattern)` | Capture only the bounds of the window whose title contains `titlePattern`. Throws if the window is not found |
+| `driver.screenshot(outputPath?)` | Take a full-screen screenshot. `outputPath` is optional: with no path (or a bare filename) it saves to the default folder `C:\marvin screen shots\<test name>\`; pass an absolute path to override. Returns the saved path |
+| `driver.screenshotRegion(outputPath?, region)` | Save a cropped region, `region = { x, y, width, height }`. Same default location rules as `screenshot` |
+| `driver.screenshotWindow(outputPath?, titlePattern)` | Capture only the bounds of the window whose title contains `titlePattern`. Same default location rules as `screenshot`. Throws if the window is not found |
+
+By default every screenshot is saved under `C:\marvin screen shots\` in a subfolder named after the test. Pass an absolute path to any screenshot method to save somewhere specific instead.
 | `driver.readText(region?, options?)` | OCR the screen (or a region) using Tesseract. Returns `{ text, confidence, words: [{ text, confidence, bbox: { x0, y0, x1, y1 } }] }`. Pass `options.window = "Window Title"` (with no `region`) to OCR just that window |
 | `driver.findImage(refImage, options?)` | Find a reference image on screen. Returns `{ found, confidence, centerX, centerY, ... }` |
 | `driver.clickImage(refImage, options?)` | Find image and click its centre |

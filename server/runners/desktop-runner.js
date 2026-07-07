@@ -453,7 +453,9 @@ Start-Sleep -Milliseconds 150;
 [DragOps]::GetCursorPos([ref]$p) | Out-Null; Write-Output ("afterDrag=$($p.X),$($p.Y)");
 [DragOps]::mouse_event(0x0004, 0, 0, 0, 0);
 `);
-      process.stdout.write(`[drag diag] relativeTo rect=${rectInfo} | ${String(out).replace(/\r?\n/g, " | ")}\n`);
+      if (options.debug) {
+        process.stdout.write(`[drag diag] relativeTo rect=${rectInfo} | ${String(out).replace(/\r?\n/g, " | ")}\n`);
+      }
     },
 
     // Scroll the mouse wheel at (x, y). `delta` is a small integer: positive

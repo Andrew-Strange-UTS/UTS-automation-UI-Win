@@ -243,6 +243,24 @@ By default every screenshot is saved under `C:\marvin screen shots\` in a subfol
 
 **Modifier keys for `keyPress`:** `"Ctrl"` / `"Control"`, `"Alt"`, `"Shift"`, `"Win"` / `"Meta"`
 
+### Running desktop tests over Remote Desktop (RDP) or a VM
+
+Desktop automation injects mouse and keyboard input into the Windows session it
+runs in. When that session is a Remote Desktop / VM connection, keep these in mind:
+
+- **Do not fight the injected input.** If you move your physical mouse over the
+  focused RDP window while a test runs, your real input competes with the injected
+  input and mouse actions (especially drags) can fail. Let the test run untouched.
+- **You may not see the cursor move live.** The remote cursor often does not render
+  in the RDP client while the window is unfocused. The actions still happen inside
+  the session (for example, a drag draws its stroke); you just see the result when
+  you refocus the window.
+- **Keep the session active.** Minimising or disconnecting the RDP window can lock
+  the session and stop input injection. Leave it open (unfocused is fine).
+- `driver.drag(..., { debug: true })` prints a `[drag diag]` line (window rect,
+  screen bounds, and where the cursor actually landed) if you need to confirm the
+  coordinates are on-screen.
+
 ---
 
 ## Image OCR and Recognition (Desktop Tests)

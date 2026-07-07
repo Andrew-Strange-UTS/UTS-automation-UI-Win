@@ -214,7 +214,7 @@ module.exports = async function (driver, parameters = {}, zephyrLog) {
 | `driver.doubleClick(x, y)` | Double-click at coordinates — selects the word under the cursor in most apps |
 | `driver.tripleClick(x, y)` | Triple-click at coordinates — selects the whole line/paragraph in most apps |
 | `driver.shiftClick(x, y, button?)` | Click while holding Shift. Combine with a prior `mouseClick` to range-select text from the first click point to here |
-| `driver.drag({ from, to }, options?)` | Click-and-drag: press the left button at `from = { x, y }`, move to `to = { x, y }`, release. Pass `{ relativeTo: "Window Title" }` for window-relative coordinates |
+| `driver.drag({ from, to }, options?)` | Click-and-drag: press the left button at `from = { x, y }`, step the cursor along the path (so apps like Paint register a continuous stroke), then release. Options: `relativeTo: "Window Title"` for window-relative coordinates, `steps` (path points, default scales with distance), `stepDelayMs` (default 15) |
 | `driver.scroll(x, y, delta, options?)` | Scroll the mouse wheel at `(x, y)`. `delta` is a small integer (positive scrolls up, negative down). Pass `{ relativeTo: "Window Title" }` for window-relative coordinates |
 | `driver.findWindow(titlePattern)` | Find a window by partial title match, returns window handle |
 | `driver.focusWindow(titlePattern)` | Bring a window to the foreground by partial title match |

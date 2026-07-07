@@ -376,7 +376,14 @@ Start-Sleep -Milliseconds 60
         toX += rect.x;
         toY += rect.y;
       }
-      // MOUSEEVENTF_LEFTDOWN = 0x0002, MOUSEEVENTF_LEFTUP = 0x0004
+      // A drag is a press, then the cursor stepped through intermediate points
+      // with the button held, then a release. Apps like Paint sample mouse-move
+      // events during the hold, so a single teleport from->to draws nothing;
+      // interpolating the path (and nudging with MOUSEEVENTF_MOVE at each step)
+      // is what makes the stroke register.
+      const dist = Math.hypot(toX - fromX, toY - fromY);
+      const steps = Math.max(10, Math.min(80, options.steps || Math.round(dist / 10)));
+      const stepDelay = options.stepDelayMs != null ? options.stepDelayMs : 15;
       await runPowerShell(`
 Add-Type @"
 using System;
@@ -386,12 +393,20 @@ public class DragOps {
     [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, int dwExtraInfo);
 }
 "@
-[DragOps]::SetCursorPos(${fromX}, ${fromY});
-Start-Sleep -Milliseconds 100;
+$fromX = ${fromX}; $fromY = ${fromY}; $toX = ${toX}; $toY = ${toY}; $steps = ${steps};
+# MOUSEEVENTF_MOVE = 0x0001, MOUSEEVENTF_LEFTDOWN = 0x0002, MOUSEEVENTF_LEFTUP = 0x0004
+[DragOps]::SetCursorPos($fromX, $fromY);
+Start-Sleep -Milliseconds 120;
 [DragOps]::mouse_event(0x0002, 0, 0, 0, 0);
-Start-Sleep -Milliseconds 100;
-[DragOps]::SetCursorPos(${toX}, ${toY});
-Start-Sleep -Milliseconds 100;
+Start-Sleep -Milliseconds 120;
+for ($i = 1; $i -le $steps; $i++) {
+  $x = [int]($fromX + (($toX - $fromX) * $i / $steps));
+  $y = [int]($fromY + (($toY - $fromY) * $i / $steps));
+  [DragOps]::SetCursorPos($x, $y);
+  [DragOps]::mouse_event(0x0001, 0, 0, 0, 0);
+  Start-Sleep -Milliseconds ${stepDelay};
+}
+Start-Sleep -Milliseconds 120;
 [DragOps]::mouse_event(0x0004, 0, 0, 0, 0);
 `);
     },

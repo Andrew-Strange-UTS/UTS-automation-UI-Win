@@ -2,7 +2,9 @@
 // Image processing utilities for OCR and template matching.
 // Uses tesseract.js (pure JS OCR) and jimp (pure JS image manipulation).
 
-const Jimp = require("jimp");
+// Jimp v1 exports the image class as a named export (not the module default),
+// so `Jimp.read` lives on this destructured binding.
+const { Jimp } = require("jimp");
 const { createWorker } = require("tesseract.js");
 const fs = require("fs");
 const path = require("path");

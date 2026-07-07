@@ -201,7 +201,8 @@ export default function RunSequence({
       style={{
         minWidth: "220px",
         width: "300px",
-        flexShrink: 1,
+        flexShrink: 0,
+        alignSelf: "flex-start",
         background: "#f7f7f7",
         borderLeft: "1px solid #ccc",
         padding: "20px",

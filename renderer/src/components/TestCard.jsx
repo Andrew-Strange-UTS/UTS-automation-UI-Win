@@ -105,7 +105,8 @@ export default function TestCard({
   return (
     <div
       style={{
-        width: "1400px",
+        width: "100%",
+        maxWidth: "1400px",
         margin: "20px auto",
         border: "1px solid #ccc",
         borderRadius: "10px",

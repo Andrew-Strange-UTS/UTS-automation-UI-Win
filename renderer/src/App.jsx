@@ -594,6 +594,7 @@ export default function App() {
   return (
     <div style={{ display: "flex" }}>
       <div style={{ flex: 1, minWidth: 0, padding: "20px", overflow: "hidden" }}>
+        <div style={{ width: "80%", margin: "0 auto" }}>
         <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "20px", marginBottom: "8px" }}>
           <h1 style={{ margin: 0, fontSize: "42px" }}>Marvin</h1>
           <img
@@ -911,6 +912,7 @@ export default function App() {
             />
           ))
         )}
+        </div>
       </div>
       {/* Execution sidebar */}
       <RunSequence

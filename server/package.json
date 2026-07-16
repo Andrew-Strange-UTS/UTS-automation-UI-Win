@@ -3,6 +3,7 @@
     "version": "1.0.0",
     "scripts": {
         "start": "node app.js",
+        "test": "node --test",
         "start:scheduler": "node scheduler-service.js",
         "install:service:win": "node ../scripts/install-service-win.js",
         "uninstall:service:win": "node ../scripts/uninstall-service-win.js",

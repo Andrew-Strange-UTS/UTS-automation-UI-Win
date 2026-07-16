@@ -8,6 +8,7 @@ export default function RunSequence({
   sequence,
   testType = "desktop",
   executedBy = "",
+  accountId = "",
   availableSecrets = [],
   onTestResult,
   onSequenceLog,
@@ -163,6 +164,7 @@ export default function RunSequence({
         parameters: allParameters,
         testType,
         executedBy,
+        accountId,
       }),
     });
     if (!response.ok) {

@@ -90,6 +90,15 @@ export default function App() {
   useEffect(() => {
     if (typeof window !== "undefined") localStorage.setItem("testerName", testerName);
   }, [testerName]);
+  // EPEA-3469: Atlassian account id used to populate Zephyr's native
+  // "Executed by" / "Assigned to" identity fields (the tester name alone
+  // is free text and can't set those fields).
+  const [atlassianAccountId, setAtlassianAccountId] = useState(() =>
+    typeof window !== "undefined" ? localStorage.getItem("atlassianAccountId") || "" : ""
+  );
+  useEffect(() => {
+    if (typeof window !== "undefined") localStorage.setItem("atlassianAccountId", atlassianAccountId);
+  }, [atlassianAccountId]);
   const platform =
     typeof window !== "undefined" && window.electronAPI?.platform
       ? window.electronAPI.platform
@@ -887,8 +896,21 @@ export default function App() {
                 value={testerName}
                 onChange={(e) => setTesterName(e.target.value)}
                 placeholder="e.g. Jane Smith"
-                title="Recorded as 'Executed by' on Zephyr results"
+                title="Recorded as 'Executed by' on Zephyr results when no Atlassian account ID is set"
                 style={{ padding: "6px 10px", fontSize: "13px", borderRadius: "4px", border: "1px solid #ccc", width: "200px", fontWeight: "normal" }}
+              />
+            </label>
+          </div>
+          <div style={{ marginTop: "8px" }}>
+            <label style={{ fontSize: "13px", color: theme.primary, fontWeight: "bold" }}>
+              Atlassian account ID (optional):{" "}
+              <input
+                type="text"
+                value={atlassianAccountId}
+                onChange={(e) => setAtlassianAccountId(e.target.value)}
+                placeholder="e.g. 5b10ac8d82e05b22cc7d4ef5"
+                title="Sets Zephyr's native 'Executed by' and 'Assigned to' fields. Find it in your Atlassian profile URL."
+                style={{ padding: "6px 10px", fontSize: "13px", borderRadius: "4px", border: "1px solid #ccc", width: "260px", fontWeight: "normal" }}
               />
             </label>
           </div>
@@ -991,6 +1013,7 @@ export default function App() {
         }))}
         testType={testType}
         executedBy={testerName}
+        accountId={atlassianAccountId}
         availableSecrets={availableSecrets}
         onTestResult={(name, options, onDone) =>
           handleRunTestViaWebSocket(name, testOptions[name], onDone)

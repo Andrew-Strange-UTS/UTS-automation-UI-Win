@@ -307,6 +307,7 @@ ${sequence.map((test) => `  ${JSON.stringify(test.zephyr || null)}`).join(",\n")
 ];
 const ZEPHYR_TOKEN = ${JSON.stringify(zephyrToken)};
 const EXECUTED_BY = ${JSON.stringify(schedule.executedBy || "")};
+const ACCOUNT_ID = ${JSON.stringify(schedule.accountId || "")};
 function log(msg) { process.stdout.write(msg + "\\n"); }
 // EPEA-2514: capture a screenshot when a scheduled step fails so it can be
 // bundled into the schedule export.
@@ -334,6 +335,7 @@ async function sendZephyrResult(zephyrConfig, statusName, stepResults) {
       testCycleKey: zephyrConfig.cycleKey,
       statusName,
       executedBy: EXECUTED_BY || undefined,
+      accountId: ACCOUNT_ID || undefined,
       testScriptResults: stepResults.length > 0 ? stepResults : undefined,
     });
     log("Zephyr: Reported " + statusName + " for " + zephyrConfig.caseKey + " (HTTP " + result.statusCode + ")");
@@ -628,7 +630,7 @@ app.get("/api/schedules/:id/logs", (req, res) => {
 // Create schedule
 app.post("/api/schedules", (req, res) => {
   const { name, sequencePayload, time, days, ntfyTopic, ntfyServer, teamsWebhookAll, teamsWebhookFail,
-          executedBy, bundledSecrets: reqSecrets, bundledTestCode: reqCode, bundledImages: reqImages } = req.body;
+          executedBy, accountId, bundledSecrets: reqSecrets, bundledTestCode: reqCode, bundledImages: reqImages } = req.body;
 
   if (!name || !sequencePayload || !time || !days || !Array.isArray(days) || days.length === 0) {
     return res.status(400).json({ error: "Required: name, sequencePayload, time (HH:MM), days (array)" });
@@ -657,6 +659,7 @@ app.post("/api/schedules", (req, res) => {
     teamsWebhookAll: teamsWebhookAll || "",
     teamsWebhookFail: teamsWebhookFail || "",
     executedBy: executedBy || "",
+    accountId: accountId || "",
     status: "active",
     createdAt: new Date().toISOString(),
     lastRun: null,
@@ -673,12 +676,13 @@ app.patch("/api/schedules/:id", (req, res) => {
   const schedule = scheduleStore.getById(req.params.id);
   if (!schedule) return res.status(404).json({ error: "Schedule not found" });
 
-  const { name, time, days, ntfyTopic, ntfyServer, teamsWebhookAll, teamsWebhookFail, executedBy } = req.body;
+  const { name, time, days, ntfyTopic, ntfyServer, teamsWebhookAll, teamsWebhookFail, executedBy, accountId } = req.body;
   const updates = {};
   if (name) updates.name = name;
   if (ntfyTopic !== undefined) updates.ntfyTopic = ntfyTopic;
   if (ntfyServer !== undefined) updates.ntfyServer = ntfyServer;
   if (executedBy !== undefined) updates.executedBy = executedBy;
+  if (accountId !== undefined) updates.accountId = accountId;
   if (teamsWebhookAll !== undefined) updates.teamsWebhookAll = teamsWebhookAll;
   if (teamsWebhookFail !== undefined) updates.teamsWebhookFail = teamsWebhookFail;
   if (time) {
@@ -755,7 +759,7 @@ app.post("/api/schedules/:id/export", (req, res) => {
     schedule: {
       name: schedule.name, time: schedule.time, days: schedule.days,
       ntfyTopic: schedule.ntfyTopic, ntfyServer: schedule.ntfyServer, teamsWebhookAll: schedule.teamsWebhookAll, teamsWebhookFail: schedule.teamsWebhookFail,
-      executedBy: schedule.executedBy,
+      executedBy: schedule.executedBy, accountId: schedule.accountId,
     },
     sequencePayload: schedule.sequencePayload,
     bundledSecrets: schedule.bundledSecrets || {},
@@ -840,6 +844,7 @@ app.post("/api/schedules/import", (req, res) => {
     teamsWebhookAll: bundle.schedule.teamsWebhookAll || "",
     teamsWebhookFail: bundle.schedule.teamsWebhookFail || "",
     executedBy: bundle.schedule.executedBy || "",
+    accountId: bundle.schedule.accountId || "",
     status: "active",
     createdAt: new Date().toISOString(),
     lastRun: null,

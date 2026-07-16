@@ -33,7 +33,7 @@ function injectSecretsInParams(obj) {
 }
 
 router.post("/run", async (req, res) => {
-  const { sequence, parameters = {}, testType = "web", executedBy = "" } = req.body;
+  const { sequence, parameters = {}, testType = "web", executedBy = "", accountId = "" } = req.body;
   if (!Array.isArray(sequence) || sequence.length === 0) {
     res.status(400).json({ error: "No tests in sequence" });
     return;
@@ -134,6 +134,7 @@ const fs = require('fs');
 const nodePath = require('path');
 const FAILURE_DIR = ${JSON.stringify(path.join(seqDir, "failures"))};
 const EXECUTED_BY = ${JSON.stringify(executedBy)};
+const ACCOUNT_ID = ${JSON.stringify(accountId)};
 const stepFns = [
 ${sequence.map(test => {
   if (test.builtin) {
@@ -177,6 +178,7 @@ async function sendZephyrResult(zephyrConfig, statusName, stepResults) {
       testCycleKey: zephyrConfig.cycleKey,
       statusName,
       executedBy: EXECUTED_BY || undefined,
+      accountId: ACCOUNT_ID || undefined,
       testScriptResults: stepResults.length > 0 ? stepResults : undefined,
     });
     log("[Zephyr] Reported " + statusName + " for " + zephyrConfig.caseKey + " (HTTP " + result.statusCode + ")");

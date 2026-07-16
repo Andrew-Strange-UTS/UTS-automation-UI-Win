@@ -343,11 +343,27 @@
 
 **Description:** Add support for a tester name in Marvin and, when publishing results to Zephyr, pass that name through to Zephyr as Executed by.
 
+**Update (EPEA-3469):** the comment-line approach below is now a fallback. When an Atlassian account id is supplied, the native Zephyr `executedById` / `assignedToId` fields are populated instead. See EPEA-3469.
+
 **Acceptance Criteria:**
 - [x] Testers will put their name in the name field in Marvin.
 - [x] All tests / automation that have the 3 Zephyr fields set will then add the name to the "Executed by" in the API call to Zephyr. *(Zephyr Cloud has no free-text executedBy field, so the name is sent in the execution comment as "Executed by: <name>")*
 - [x] Name will not be mandatory.
 - [x] Name can also be added to a scheduled test.
+
+---
+
+### EPEA-3469 — Populate Zephyr "Assigned To" and "Executed By" identity fields `5 pts`
+
+**Description:** When Marvin publishes results to Zephyr it should set two separate native identity fields instead of leaving them "Unassigned": *Assigned To* (the user assigned to the case within the cycle) and *Executed By* (the user who ran the test). Both are populated from the person who triggered the execution in Marvin. The Zephyr Cloud API requires an Atlassian account id for these native fields, so Marvin gains an explicit "Atlassian account ID" field alongside the tester name; the existing "Executed by: <name>" comment (EPEA-2692) remains as a fallback when no account id is supplied.
+
+**Acceptance Criteria:**
+- [x] AC1: Marvin has an Atlassian account ID field (paired with the tester name) that persists across restarts. *(localStorage key `atlassianAccountId` in App.jsx; per-schedule field in SchedulePanel.jsx)*
+- [x] AC2: When an account id is set, the Zephyr execution POST sets the native `executedById` field to it.
+- [x] AC3: When an account id is set, the Zephyr execution POST sets `assignedToId` so the case is no longer "Unassigned" in the cycle.
+- [x] AC4: When no account id is available, reporting still succeeds and falls back to the "Executed by: <name>" comment line, without crashing.
+- [x] AC5: Both fields are populated for interactive runs (sequence.js) and for scheduled runs (scheduler-service.js).
+- [x] AC6: Behaviour applies per test that has the three Zephyr keys configured. *(unchanged per-step Zephyr reporting path)*
 
 ---
 
@@ -450,8 +466,8 @@
 
 ---
 
-**Total stories:** 32
-**Total points:** 303
+**Total stories:** 33
+**Total points:** 308
 **Assignee:** Andrew Strange
 
 ---
@@ -467,7 +483,7 @@
 | Web Runner | 2 | 2 (EPEA-2500, EPEA-2501) | 0 | 0 |
 | Scheduling | 3 | 3 (EPEA-2502, EPEA-2503, EPEA-2504) | 0 | 0 |
 | Secrets Management | 2 | 2 (EPEA-2505, EPEA-2506) | 0 | 0 |
-| Reporting & Notifications | 4 | 4 (EPEA-2507, EPEA-2508, EPEA-2509, EPEA-2692) | 0 | 0 |
+| Reporting & Notifications | 5 | 5 (EPEA-2507, EPEA-2508, EPEA-2509, EPEA-2692, EPEA-3469) | 0 | 0 |
 | Repo & Distribution | 2 | 2 (EPEA-2510, EPEA-2511) | 0 | 0 |
 | Testing & Onboarding | 3 | 3 (EPEA-2512, EPEA-2513, EPEA-2516) | 0 | 0 |
-| **Totals** | **32** | **31** | **0** | **1** |
+| **Totals** | **33** | **32** | **0** | **1** |

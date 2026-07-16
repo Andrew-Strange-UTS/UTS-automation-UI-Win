@@ -5,34 +5,53 @@
 const https = require("https");
 
 /**
- * Posts a test execution result to Zephyr Scale.
- * @param {string} token - Zephyr API bearer token
+ * Builds the JSON body for a Zephyr Scale test execution.
+ * Kept as a pure function so the field logic can be unit tested without a network call.
  * @param {object} opts
  * @param {string} opts.projectKey
  * @param {string} opts.testCaseKey
  * @param {string} opts.testCycleKey
  * @param {string} opts.statusName        - overall "Pass" or "Fail"
  * @param {string} [opts.comment]         - optional overall execution comment
- * @param {string} [opts.executedBy]      - optional tester name; recorded as "Executed by"
+ * @param {string} [opts.executedBy]      - free-text tester name (fallback only)
+ * @param {string} [opts.accountId]       - Atlassian account id for the native identity fields
  * @param {Array}  [opts.testScriptResults] - per-step results array
- *   Each entry: { statusName: "Pass"|"Fail", actualResult: "description" }
+ * @returns {object} the request payload object
+ */
+function buildExecutionPayload({ projectKey, testCaseKey, testCycleKey, statusName, comment, executedBy, accountId, testScriptResults }) {
+  // EPEA-3469: when an Atlassian account id is provided, populate the native
+  // Zephyr identity fields. "executedById" records who ran the test and
+  // "assignedToId" assigns the case within the cycle, so it no longer shows
+  // as "Unassigned".
+  const resolvedAccountId = typeof accountId === "string" ? accountId.trim() : "";
+  const hasAccountId = resolvedAccountId !== "";
+
+  // EPEA-2692 fallback: the Zephyr Cloud API only accepts an account id (not a
+  // free-text name) on the native field, so without one we surface the tester
+  // name in the execution comment as "Executed by: <name>" as before.
+  const executedByLine = !hasAccountId && executedBy ? `Executed by: ${executedBy}` : "";
+  const fullComment = [executedByLine, comment].filter(Boolean).join("\n") || undefined;
+
+  return {
+    projectKey,
+    testCaseKey,
+    testCycleKey,
+    statusName,
+    ...(hasAccountId ? { executedById: resolvedAccountId, assignedToId: resolvedAccountId } : {}),
+    ...(fullComment ? { comment: fullComment } : {}),
+    ...(testScriptResults && testScriptResults.length > 0 ? { testScriptResults } : {}),
+  };
+}
+
+/**
+ * Posts a test execution result to Zephyr Scale.
+ * @param {string} token - Zephyr API bearer token
+ * @param {object} opts - see buildExecutionPayload
  * @returns {Promise<{statusCode: number, body: string}>}
  */
-function postTestExecution(token, { projectKey, testCaseKey, testCycleKey, statusName, comment, executedBy, testScriptResults }) {
+function postTestExecution(token, opts) {
   return new Promise((resolve, reject) => {
-    // The Zephyr Scale Cloud API only accepts an Atlassian account id for the
-    // native "executedById" field, so a free-text tester name is surfaced in the
-    // execution comment as "Executed by: <name>".
-    const executedByLine = executedBy ? `Executed by: ${executedBy}` : "";
-    const fullComment = [executedByLine, comment].filter(Boolean).join("\n") || undefined;
-    const payload = JSON.stringify({
-      projectKey,
-      testCaseKey,
-      testCycleKey,
-      statusName,
-      ...(fullComment ? { comment: fullComment } : {}),
-      ...(testScriptResults && testScriptResults.length > 0 ? { testScriptResults } : {}),
-    });
+    const payload = JSON.stringify(buildExecutionPayload(opts));
 
     const options = {
       hostname: "api.zephyrscale.smartbear.com",
@@ -63,4 +82,4 @@ function postTestExecution(token, { projectKey, testCaseKey, testCycleKey, statu
   });
 }
 
-module.exports = { postTestExecution };
+module.exports = { postTestExecution, buildExecutionPayload };

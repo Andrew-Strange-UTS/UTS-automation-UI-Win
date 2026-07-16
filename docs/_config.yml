@@ -14,7 +14,8 @@ search_enabled: true
 
 # Internal planning files that should not be published to the public site.
 exclude:
-  - TODO.md
+  - UserStories.md
+  - TechFromUserStories.md
   - Gemfile
   - Gemfile.lock
 

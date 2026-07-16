@@ -1,4 +1,4 @@
-# Marvin — TODO
+# Marvin: User Stories
 
 ---
 
@@ -450,7 +450,7 @@
 
 ---
 
-**Total stories:** 33
+**Total stories:** 32
 **Total points:** 303
 **Assignee:** Andrew Strange
 

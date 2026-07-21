@@ -28,12 +28,17 @@ function getLastError() {
   return lastError;
 }
 
-// server/ is listed in asarUnpack, so at runtime it lives in app.asar.unpacked
-// rather than app.asar. __dirname still points inside the archive, so rewrite
-// it. This matters because the backend spawns plain `node` processes to run
-// tests, and those cannot read anything inside an asar archive.
+// The build sets `asar: false`, because the backend spawns plain `node`
+// processes to run tests and those cannot read inside an asar archive. If the
+// build is ever switched back to asar, prefer the unpacked copy when one
+// exists. Resolving to a path that is not there is what silently broke startup
+// before, so only rewrite when the target actually exists.
 function resolveUnpacked(target) {
-  return target.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+  if (!target.includes(`app.asar${path.sep}`)) return target;
+
+  const unpacked = target.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+  if (fs.existsSync(unpacked)) return unpacked;
+  return target;
 }
 
 function openLog() {
@@ -83,6 +88,17 @@ function startBackend(port) {
     // opaque. A missing entry point means the packaging is wrong.
     if (!fs.existsSync(serverEntry)) {
       lastError = `Backend entry point not found:\n${serverEntry}`;
+      writeLog(`[ERROR] ${lastError}\n`);
+      resolve(false);
+      return;
+    }
+
+    // A missing node_modules produces a bare "Cannot find module 'express'"
+    // several frames deep. Name the real problem instead.
+    if (!fs.existsSync(serverNodeModules)) {
+      lastError =
+        `The backend's dependencies are missing:\n${serverNodeModules}\n\n` +
+        `The app was packaged without server/node_modules. Rebuild with 'npm run dist'.`;
       writeLog(`[ERROR] ${lastError}\n`);
       resolve(false);
       return;

@@ -40,9 +40,6 @@
       "!server/node_modules/.cache",
       "!server/daemon"
     ],
-    "asar": true,
-    "asarUnpack": [
-      "server/**"
-    ]
+    "asar": false
   }
 }

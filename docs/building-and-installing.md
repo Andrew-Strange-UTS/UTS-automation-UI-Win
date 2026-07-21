@@ -6,8 +6,17 @@ nav_order: 3
 # Building and installing the Windows installer
 
 Marvin ships as a single NSIS `.exe` installer that bundles Electron, the Node
-server and its dependencies, the built renderer, and a portable Git. Target
-machines do not need Node.js or Git installed.
+server and its dependencies, and the built renderer. Target machines do not need
+Node.js installed.
+
+**Git must be installed on the target machine** and available on the `PATH`.
+Cloning a test repo goes through `simpleGit()` in
+`server/controllers/gitController.js`, which resolves `git` from the system
+`PATH`. The `resources/portable-git` entry in the `extraResources` build config
+is not wired up: the folder is gitignored and never populated, and no code points
+simple-git at it, so `npm run dist` logs a harmless "file source doesn't exist"
+warning for it. Bundling a portable Git would need that folder populated *and*
+`simpleGit` configured with its binary path.
 
 ## Build the installer
 

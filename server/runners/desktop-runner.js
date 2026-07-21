@@ -10,13 +10,6 @@ const fs = require("fs");
 const { cropAndSave, ocrFromImage, findImageOnScreen, terminateWorker } = require("../utils/image-utils");
 const { getNativePrelude } = require("./native-types");
 
-// Working directory for every spawned PowerShell. Deliberately a local-disk
-// path: see the comment on the exec() call in runPowerShell.
-// UTS_POWERSHELL_CWD overrides it if a machine needs something else.
-const POWERSHELL_CWD =
-  process.env.UTS_POWERSHELL_CWD ||
-  (process.platform === "win32" ? process.env.SystemRoot || "C:\\Windows" : os.tmpdir());
-
 /**
  * Explains a failed image match in terms the test author can act on.
  *
@@ -67,17 +60,7 @@ function createDesktopDriver(options = {}) {
       const encoded = Buffer.from(wrapped, "utf16le").toString("base64");
       exec(
         `powershell -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`,
-        {
-          timeout: 30000,
-          maxBuffer: 10 * 1024 * 1024,
-          // Run from local disk rather than inheriting the test's working
-          // directory. Tests live under the user data directory, which on a
-          // Citrix/FSLogix machine is a network-backed profile container, and
-          // every CreateProcess has to resolve its working directory. Marvin
-          // spawns two processes per action (cmd -> powershell), so a slow cwd
-          // is paid twice for every single driver call.
-          cwd: POWERSHELL_CWD,
-        },
+        { timeout: 30000, maxBuffer: 10 * 1024 * 1024 },
         (err, stdout, stderr) => {
           if (err) {
             const msg = [

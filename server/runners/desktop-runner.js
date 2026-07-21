@@ -9,6 +9,7 @@ const os = require("os");
 const fs = require("fs");
 const { cropAndSave, ocrFromImage, findImageOnScreen, terminateWorker } = require("../utils/image-utils");
 const { getNativePrelude } = require("./native-types");
+const { PowerShellSession, isSupported: sessionSupported } = require("./powershell-session");
 
 /**
  * Explains a failed image match in terms the test author can act on.
@@ -50,10 +51,39 @@ function describeImageMiss(match) {
 function createDesktopDriver(options = {}) {
   const context = options.context || { imagesDir: null };
   
-  // Native P/Invoke types come from a precompiled, cached assembly. Loading it
-  // costs a few tens of ms; defining the same types inline invoked the C#
-  // compiler on every single action, which is what made every action slow.
-  async function runPowerShell(script) {
+  // One PowerShell process serves the whole run. Spawning one per action cost
+  // ~11s each on a managed VM, flat regardless of the work done, because the
+  // cost is in process creation. Created lazily and reused; if it cannot be
+  // started we fall back to the original per-call spawn, which is slow but
+  // correct.
+  let session = null;
+  let sessionUnavailable = false;
+
+  async function getSession() {
+    if (sessionUnavailable || !sessionSupported()) return null;
+    if (session) return session;
+
+    try {
+      const prelude = await getNativePrelude();
+      const candidate = new PowerShellSession({ prelude });
+      await candidate.start();
+      session = candidate;
+      // A test that throws may never reach driver.quit(). Closing stdin on
+      // exit would normally end PowerShell anyway; this makes it certain.
+      process.once("exit", disposeSession);
+      return session;
+    } catch (err) {
+      // Never fail an action because the optimisation is unavailable.
+      console.error(
+        `[desktop-runner] PowerShell session unavailable, falling back to per-call spawn: ${err.message}`
+      );
+      sessionUnavailable = true;
+      return null;
+    }
+  }
+
+  // The original path: a fresh process per call.
+  async function runPowerShellSpawned(script) {
     const prelude = await getNativePrelude();
     return new Promise((resolve, reject) => {
       const wrapped = `$ErrorActionPreference = 'Stop'; try { ${prelude} ${script} } catch { Write-Error $_; exit 1 }`;
@@ -74,6 +104,31 @@ function createDesktopDriver(options = {}) {
         }
       );
     });
+  }
+
+  function disposeSession() {
+    if (session) {
+      session.dispose();
+      session = null;
+    }
+  }
+
+  async function runPowerShell(script) {
+    const active = await getSession();
+    if (!active) return runPowerShellSpawned(script);
+
+    try {
+      return await active.run(script);
+    } catch (err) {
+      // A dead session is recoverable; a failing script is not. Only retry
+      // when the session itself went away, so a genuine script error is
+      // reported once rather than run twice.
+      if (/session (exited|error|is not running)/i.test(err.message)) {
+        session = null;
+        return runPowerShellSpawned(script);
+      }
+      throw err;
+    }
   }
 
   // Resolve an image reference to an absolute path
@@ -800,10 +855,12 @@ if ($null -ne $pattern) { Write-Output $pattern.Current.Value } else { Write-Out
 
     // --- Cleanup ---
     async quit() {
+      disposeSession();
       await terminateWorker();
     },
 
     async deleteSession() {
+      disposeSession();
       await terminateWorker();
     },
   };

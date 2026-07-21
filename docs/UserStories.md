@@ -110,6 +110,21 @@
 
 ## Desktop Driver
 
+### EPEA-TBD-4 — Reuse a persistent PowerShell session for desktop actions `8 pts`
+
+**Description:** Every desktop driver action spawned `cmd.exe` then `powershell.exe`. Measured on the target VM, that cost ~11.1s per action for the installed app and ~1.35s in dev, flat regardless of how much work the action did, so a 60-drag test took 12 minutes installed against 105s in dev. The cost is process creation, not the work, so one long-lived PowerShell process now serves a whole run.
+
+**Acceptance Criteria:**
+- [x] AC1: A single PowerShell process serves all driver actions for the duration of a test run.
+- [x] AC2: Each action's output and errors are still returned individually and in order.
+- [x] AC3: A failing action raises the same error shape and does not poison later actions.
+- [x] AC4: The session is torn down at the end of a run, including on failure.
+- [x] AC5: If the session dies mid-run it is restarted transparently rather than failing the test.
+- [x] AC6: A per-action timeout is retained, so a hung command cannot hang the run.
+- [ ] AC7: Measured improvement is recorded against test 06 on the target VM.
+
+---
+
 ### EPEA-2491 — PowerShell desktop driver — basic window control `13 pts`
 
 **Description:** Implement a desktop driver that exposes an async API backed by PowerShell + Win32 APIs. Core operations: `launch(exePath)`, `findWindow(titlePattern)`, `closeWindow(handle)`, `sendKeys(handle, text)`, `click(handle, x, y)`. The driver is injected into desktop run.js files as the first argument (same signature as Selenium driver for web tests).

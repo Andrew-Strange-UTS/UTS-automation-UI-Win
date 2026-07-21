@@ -8,6 +8,7 @@ const path = require("path");
 const os = require("os");
 const fs = require("fs");
 const { cropAndSave, ocrFromImage, findImageOnScreen, terminateWorker } = require("../utils/image-utils");
+const { getNativePrelude } = require("./native-types");
 
 /**
  * Explains a failed image match in terms the test author can act on.
@@ -49,9 +50,13 @@ function describeImageMiss(match) {
 function createDesktopDriver(options = {}) {
   const context = options.context || { imagesDir: null };
   
-  function runPowerShell(script) {
+  // Native P/Invoke types come from a precompiled, cached assembly. Loading it
+  // costs a few tens of ms; defining the same types inline invoked the C#
+  // compiler on every single action, which is what made every action slow.
+  async function runPowerShell(script) {
+    const prelude = await getNativePrelude();
     return new Promise((resolve, reject) => {
-      const wrapped = `$ErrorActionPreference = 'Stop'; try { ${script} } catch { Write-Error $_; exit 1 }`;
+      const wrapped = `$ErrorActionPreference = 'Stop'; try { ${prelude} ${script} } catch { Write-Error $_; exit 1 }`;
       const encoded = Buffer.from(wrapped, "utf16le").toString("base64");
       exec(
         `powershell -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`,
@@ -131,15 +136,6 @@ function createDesktopDriver(options = {}) {
   async function getWindowRect(titlePattern) {
     const escaped = psEscape(titlePattern);
     const result = await runPowerShell(`
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class WinRectOps {
-    [StructLayout(LayoutKind.Sequential)]
-    public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
-    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
-}
-"@
 $proc = Get-Process | Where-Object {$_.MainWindowTitle -like '*${escaped}*'} | Select-Object -First 1;
 if ($null -eq $proc) { throw "Window matching '${escaped}' not found" }
 $rect = New-Object WinRectOps+RECT;
@@ -229,14 +225,6 @@ ${actionLines}
     const btnUp = button === "right" ? "0x0010" : "0x0004";
     const gap = options.gapMs != null ? options.gapMs : 60;
     await runPowerShell(`
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class MultiClickOps {
-    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
-    [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, int dwExtraInfo);
-}
-"@
 [MultiClickOps]::SetCursorPos(${x}, ${y});
 Start-Sleep -Milliseconds 80;
 for ($i = 0; $i -lt ${count}; $i++) {
@@ -378,14 +366,6 @@ foreach ($line in $result.Lines) { foreach ($w in $line.Words) { $r = $w.Boundin
       const btnDown = button === "right" ? "0x0008" : "0x0002";
       const btnUp = button === "right" ? "0x0010" : "0x0004";
       await runPowerShell(`
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class MouseOps {
-    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
-    [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, int dwExtraInfo);
-}
-"@
 [MouseOps]::SetCursorPos(${x}, ${y});
 Start-Sleep -Milliseconds 100;
 [MouseOps]::mouse_event(${btnDown}, 0, 0, 0, 0);
@@ -415,15 +395,6 @@ Start-Sleep -Milliseconds 100;
       const btnUp = button === "right" ? "0x0010" : "0x0004";
       // VK_SHIFT = 0x10, KEYEVENTF_KEYUP = 0x0002
       await runPowerShell(`
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class ShiftClickOps {
-    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
-    [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, int dwExtraInfo);
-    [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
-}
-"@
 [ShiftClickOps]::SetCursorPos(${x}, ${y});
 Start-Sleep -Milliseconds 100;
 [ShiftClickOps]::keybd_event(0x10, 0, 0, 0);
@@ -439,17 +410,6 @@ Start-Sleep -Milliseconds 50;
     // process so the cursor can't drift / revert between them.
     async selectRange(x1, y1, x2, y2) {
   const output = await runPowerShell(`
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class RangeOps {
-    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
-    [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
-    [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, int dwExtraInfo);
-    [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
-    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
-}
-"@
 
 function Move-AndVerify($x, $y) {
   for ($i = 0; $i -lt 5; $i++) {
@@ -507,16 +467,6 @@ Start-Sleep -Milliseconds 60
       // Reports GetCursorPos before/after so we can see whether the cursor
       // actually moves and whether the target coordinates are on-screen.
       const out = await runPowerShell(`
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class DragOps {
-    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
-    [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
-    [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, int dwExtraInfo);
-    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
-}
-"@
 Add-Type -AssemblyName System.Windows.Forms;
 $scr = [System.Windows.Forms.SystemInformation]::VirtualScreen;
 $p = New-Object DragOps+POINT;
@@ -559,14 +509,6 @@ Start-Sleep -Milliseconds 150;
       const wheel = Math.round(Number(delta) * 120);
       // MOUSEEVENTF_WHEEL = 0x0800; dwData is signed wheel movement.
       await runPowerShell(`
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class ScrollOps {
-    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
-    [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, int dwData, int dwExtraInfo);
-}
-"@
 [ScrollOps]::SetCursorPos(${x}, ${y});
 Start-Sleep -Milliseconds 100;
 [ScrollOps]::mouse_event(0x0800, 0, 0, ${wheel}, 0);
@@ -583,14 +525,6 @@ Start-Sleep -Milliseconds 100;
 
     async focusWindow(titlePattern) {
       await runPowerShell(`
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class WinFocus {
-    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-}
-"@
 $proc = Get-Process | Where-Object {$_.MainWindowTitle -like '*${titlePattern}*'} | Select-Object -First 1;
 if ($proc) {
     [WinFocus]::ShowWindow($proc.MainWindowHandle, 9);
@@ -606,22 +540,13 @@ if ($proc) {
         ? `$proc = Get-Process | Where-Object {$_.MainWindowTitle -like '*${titlePattern}*'} | Select-Object -First 1; if ($proc) { $h = $proc.MainWindowHandle; [WinMax]::SetForegroundWindow($h); [WinMax]::ShowWindow($h, 3) | Out-Null }`
         : `$h = [WinMax]::GetForegroundWindow(); [WinMax]::ShowWindow($h, 3) | Out-Null`;
       await runPowerShell(`
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class WinMax {
-    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-}
-"@
 ${lookup}
 `);
     },
 
     async getWindowTitle() {
       return await runPowerShell(
-        `Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class WinTitle { [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int count); }'; $sb = New-Object System.Text.StringBuilder 256; [WinTitle]::GetWindowText([WinTitle]::GetForegroundWindow(), $sb, 256) | Out-Null; $sb.ToString()`
+        `$sb = New-Object System.Text.StringBuilder 256; [WinTitle]::GetWindowText([WinTitle]::GetForegroundWindow(), $sb, 256) | Out-Null; $sb.ToString()`
       );
     },
 
@@ -680,15 +605,6 @@ try {
       await runPowerShell(`
 Add-Type -AssemblyName System.Windows.Forms;
 Add-Type -AssemblyName System.Drawing;
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class WinShotRect {
-    [StructLayout(LayoutKind.Sequential)]
-    public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
-    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
-}
-"@
 $proc = Get-Process | Where-Object {$_.MainWindowTitle -like '*${escaped}*'} | Select-Object -First 1;
 if ($null -eq $proc) { throw "Window matching '${escaped}' not found" }
 $rect = New-Object WinShotRect+RECT;
@@ -853,14 +769,6 @@ try {
 } catch { $invoked = $false }
 if (-not $invoked) {
   $pt = $element.GetClickablePoint();
-  Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class CtrlClickOps {
-    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
-    [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, int dwExtraInfo);
-}
-"@
   [CtrlClickOps]::SetCursorPos([int]$pt.X, [int]$pt.Y);
   Start-Sleep -Milliseconds 100;
   [CtrlClickOps]::mouse_event(0x0002, 0, 0, 0, 0);

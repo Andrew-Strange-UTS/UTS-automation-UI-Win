@@ -1,9 +1,15 @@
 // main/backend-manager.js — Manages the Express backend as a child process
 const { fork } = require("child_process");
 const path = require("path");
+const fs = require("fs");
 const { app } = require("electron");
 
 let backendProcess = null;
+let logStream = null;
+
+// Why the backend is unavailable, for the UI to show instead of a bare
+// "backend not found". Null once the backend reports ready.
+let lastError = null;
 
 function getDataDir() {
   // In production, use Electron's userData directory for writable data
@@ -14,54 +20,155 @@ function getDataDir() {
   return path.join(__dirname, "..", "data");
 }
 
+function getLogPath() {
+  return path.join(app.getPath("userData"), "logs", "backend.log");
+}
+
+function getLastError() {
+  return lastError;
+}
+
+// server/ is listed in asarUnpack, so at runtime it lives in app.asar.unpacked
+// rather than app.asar. __dirname still points inside the archive, so rewrite
+// it. This matters because the backend spawns plain `node` processes to run
+// tests, and those cannot read anything inside an asar archive.
+function resolveUnpacked(target) {
+  return target.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+}
+
+function openLog() {
+  const logPath = getLogPath();
+  try {
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    logStream = fs.createWriteStream(logPath, { flags: "a" });
+  } catch (err) {
+    console.error("[backend] Could not open log file:", err.message);
+    logStream = null;
+  }
+  return logPath;
+}
+
+function writeLog(text) {
+  if (logStream) {
+    try {
+      logStream.write(text);
+    } catch {
+      // A broken log stream must never take the app down.
+    }
+  }
+}
+
 function startBackend(port) {
-  return new Promise((resolve, reject) => {
-    const serverEntry = path.join(__dirname, "..", "server", "index.js");
+  return new Promise((resolve) => {
+    lastError = null;
+
+    const serverEntry = resolveUnpacked(path.join(__dirname, "..", "server", "index.js"));
     const dataDir = getDataDir();
 
     // Resolve the server's node_modules so spawned test scripts can find dependencies
-    const serverNodeModules = path.join(__dirname, "..", "server", "node_modules");
+    const serverNodeModules = resolveUnpacked(
+      path.join(__dirname, "..", "server", "node_modules")
+    );
 
-    backendProcess = fork(serverEntry, [], {
-      env: {
-        ...process.env,
-        PORT: String(port),
-        UTS_DATA_DIR: dataDir,
-        NODE_PATH: serverNodeModules,
-        CORS_ORIGIN: "http://localhost:5173",
-        // No remote Selenium — tests run locally
-        SELENIUM_LOCAL: "true",
-      },
-      stdio: ["pipe", "pipe", "pipe", "ipc"],
-    });
+    const logPath = openLog();
+    writeLog(
+      `\n=== Marvin backend start ${new Date().toISOString()} ===\n` +
+        `entry:        ${serverEntry}\n` +
+        `dataDir:      ${dataDir}\n` +
+        `node_modules: ${serverNodeModules}\n` +
+        `port:         ${port}\n`
+    );
+
+    // Fail fast with a precise message rather than letting fork throw something
+    // opaque. A missing entry point means the packaging is wrong.
+    if (!fs.existsSync(serverEntry)) {
+      lastError = `Backend entry point not found:\n${serverEntry}`;
+      writeLog(`[ERROR] ${lastError}\n`);
+      resolve(false);
+      return;
+    }
+
+    let settled = false;
+    const settle = (ok) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+
+    try {
+      backendProcess = fork(serverEntry, [], {
+        env: {
+          ...process.env,
+          PORT: String(port),
+          UTS_DATA_DIR: dataDir,
+          NODE_PATH: serverNodeModules,
+          CORS_ORIGIN: "http://localhost:5173",
+          // No remote Selenium — tests run locally
+          SELENIUM_LOCAL: "true",
+        },
+        stdio: ["pipe", "pipe", "pipe", "ipc"],
+      });
+    } catch (err) {
+      lastError = `Could not start the backend process: ${err.message}`;
+      writeLog(`[ERROR] ${lastError}\n`);
+      settle(false);
+      return;
+    }
 
     backendProcess.stdout.on("data", (data) => {
-      console.log(`[backend] ${data.toString().trim()}`);
+      const text = data.toString();
+      console.log(`[backend] ${text.trim()}`);
+      writeLog(text);
     });
 
     backendProcess.stderr.on("data", (data) => {
-      console.error(`[backend] ${data.toString().trim()}`);
+      const text = data.toString();
+      console.error(`[backend] ${text.trim()}`);
+      writeLog(text);
+      // Keep the tail of stderr: if the child dies, this is the useful part.
+      lastError = text.trim().split("\n").slice(-15).join("\n");
     });
 
     backendProcess.on("message", (msg) => {
       if (msg === "ready") {
         console.log(`[backend] Server ready on port ${port}`);
-        resolve();
+        writeLog(`[ready] listening on port ${port}\n`);
+        lastError = null;
+        settle(true);
       }
     });
 
     backendProcess.on("error", (err) => {
       console.error("[backend] Failed to start:", err);
-      reject(err);
+      lastError = `Could not start the backend process: ${err.message}`;
+      writeLog(`[ERROR] ${lastError}\n`);
+      settle(false);
     });
 
-    backendProcess.on("exit", (code) => {
+    backendProcess.on("exit", (code, signal) => {
       console.log(`[backend] Exited with code ${code}`);
+      writeLog(`[exit] code=${code} signal=${signal}\n`);
       backendProcess = null;
+      // Only an exit *before* the ready message is a startup failure. A later
+      // exit is the normal shutdown path.
+      if (!settled) {
+        const detail = lastError ? `\n\n${lastError}` : "";
+        lastError = `The backend exited during startup (code ${code}).${detail}`;
+        settle(false);
+      }
     });
 
-    // If the backend doesn't send "ready" within 10s, resolve anyway
-    setTimeout(() => resolve(), 10000);
+    // If the backend doesn't send "ready" within 10s, give up waiting. Report it
+    // rather than continuing as though startup succeeded.
+    setTimeout(() => {
+      if (!settled) {
+        lastError =
+          lastError ||
+          "The backend did not report ready within 10 seconds.";
+        writeLog(`[ERROR] timed out waiting for ready\n`);
+        settle(false);
+      }
+    }, 10000);
   });
 }
 
@@ -70,6 +177,14 @@ function stopBackend() {
     backendProcess.kill();
     backendProcess = null;
   }
+  if (logStream) {
+    try {
+      logStream.end();
+    } catch {
+      // Nothing useful to do if the log stream is already gone.
+    }
+    logStream = null;
+  }
 }
 
-module.exports = { startBackend, stopBackend };
+module.exports = { startBackend, stopBackend, getLastError, getLogPath };

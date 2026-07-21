@@ -1,8 +1,13 @@
 // main/main.js — Electron main process
-const { app, BrowserWindow, Tray, Menu, nativeImage, shell, screen } = require("electron");
+const { app, BrowserWindow, Tray, Menu, nativeImage, shell, screen, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs");
-const { startBackend, stopBackend } = require("./backend-manager");
+const {
+  startBackend,
+  stopBackend,
+  getLastError,
+  getLogPath,
+} = require("./backend-manager");
 
 // AC2: ensure the packaged Linux app also runs without the Chromium sandbox
 // (previously this was only passed via the dev npm script).
@@ -237,15 +242,46 @@ function waitForBackendHealth() {
   });
 }
 
+// Tell the user why the backend is unavailable, and where to look. Offer to
+// open the log, since that is the first thing anyone will be asked for.
+function reportBackendFailure() {
+  const logPath = getLogPath();
+  const reason = getLastError() || "The backend did not become available.";
+
+  destroySplash();
+
+  const { response } = dialog.showMessageBoxSync
+    ? { response: dialog.showMessageBoxSync({
+        type: "error",
+        title: "Marvin — backend did not start",
+        message: "Marvin's backend did not start, so most features will not work.",
+        detail: `${reason}\n\nFull log:\n${logPath}`,
+        buttons: ["Open log folder", "Continue anyway"],
+        defaultId: 0,
+        cancelId: 1,
+      }) }
+    : { response: 1 };
+
+  if (response === 0) {
+    shell.showItemInFolder(logPath);
+  }
+}
+
 app.whenReady().then(async () => {
   // Show the splash immediately so the user has feedback while we start up.
   createSplash();
 
   // Start the Express backend
-  await startBackend(BACKEND_PORT);
+  const started = await startBackend(BACKEND_PORT);
 
   // Additional readiness gate: wait for the health endpoint (bounded timeout).
-  await waitForBackendHealth();
+  const healthy = await waitForBackendHealth();
+
+  // Without this the app opens to a generic "backend not found" and the real
+  // reason sits in a console that a packaged app does not have.
+  if (!started || !healthy) {
+    reportBackendFailure();
+  }
 
   createWindow();
   createTray();

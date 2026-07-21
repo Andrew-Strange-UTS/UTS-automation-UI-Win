@@ -82,6 +82,32 @@
 
 ---
 
+### EPEA-TBD-2 — Packaged app fails to start its backend, silently `8 pts`
+
+**Description:** In the installed app the Express backend on port 5000 never starts and the UI reports "backend not found". Running the dev server separately on the same machine makes the installed app work, confirming that only the forked child fails. The cause is invisible today: `backend-manager.js` pipes the child's stdout/stderr to a console a packaged app does not have, and `startBackend` resolves on a 10s timeout regardless of whether the child died, so startup continues as if nothing is wrong.
+
+**Acceptance Criteria:**
+- [x] AC1: Backend stdout/stderr is written to a log file under `userData`, so failures are diagnosable on an installed app.
+- [x] AC2: If the backend child fails to spawn or exits early, the error is captured rather than swallowed by the 10s timeout.
+- [x] AC3: The UI shows the actual reason the backend is unavailable plus the log file path, instead of a generic "backend not found".
+- [x] AC4: The root cause of the fork failing in the packaged app is identified and fixed. *(server/ was packed into app.asar, but the backend spawns plain `node` processes that cannot read an asar archive; server/ is now unpacked.)*
+- [ ] AC5: The installed app starts its own backend with no dev server running. *(Awaiting verification on the target VM.)*
+
+---
+
+### EPEA-TBD-3 — Start the scheduler service automatically when it is not running `5 pts`
+
+**Description:** Extends EPEA-2489. The Scheduler Service check currently reports a failure and tells the user to run a command by hand. When the service is not responding, Marvin should attempt to start it, re-check, and only report a failure if that attempt fails.
+
+**Acceptance Criteria:**
+- [ ] AC1: When the scheduler check fails, Marvin attempts to start the service before reporting a problem.
+- [ ] AC2: After the attempt the check is re-run and the reported result reflects the retry.
+- [ ] AC3: If starting fails, the error distinguishes "not installed" from "installed but will not start" from "blocked by permissions".
+- [ ] AC4: A failed attempt never delays startup beyond a bounded timeout.
+- [ ] AC5: The SchedulePanel "service is not running" banner reflects the same retry behaviour.
+
+---
+
 ## Desktop Driver
 
 ### EPEA-2491 — PowerShell desktop driver — basic window control `13 pts`
@@ -150,6 +176,18 @@
 - [x] AC3: `driver.screenshot({ region: { x, y, width, height } })` returns a cropped region. *(Implemented as `driver.screenshotRegion(outputPath, region)`)*
 - [x] AC4: Returned value is a Buffer or base64 string usable with image matching.
 - [x] AC5: Method works without requiring any external executable beyond PowerShell.
+
+---
+
+### EPEA-TBD-1 — Reference images must match the target screen resolution `3 pts`
+
+**Description:** Image recognition compares reference images pixel-for-pixel against a screenshot of the live screen. A reference captured on a display with a different resolution or DPI scaling than the machine running the test will match unreliably or not at all. Document this for test authors and make a resolution mismatch diagnosable from the run log.
+
+**Acceptance Criteria:**
+- [ ] AC1: `docs/creating-tests.md` states that reference images must be captured at the same resolution and DPI scaling as the screen Marvin runs against.
+- [ ] AC2: Guidance covers the common failure case of capturing locally then running on a VM at a different resolution.
+- [ ] AC3: A failed image match logs the screen resolution the test observed, so a mismatch is diagnosable.
+- [ ] AC4: The docs explain how to re-capture reference images against the target machine.
 
 ---
 

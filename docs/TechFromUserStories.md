@@ -165,6 +165,14 @@ Git is a prerequisite on the target machine rather than bundled: `gitController`
 `scripts/deploy-win.ps1` is a fallback deployment path for build machines whose security policy blocks the downloaded `makensis.exe` from executing (seen as `spawn EPERM`, and as symlink/extraction failures unpacking the NSIS toolchain). Packaging up to `dist/win-unpacked` still succeeds there, so the script installs that folder directly: elevation check, copy to `%ProgramFiles%\Marvin`, all-users shortcuts via `CommonDesktopDirectory`/`CommonPrograms`, then scheduler service registration. Supports `-Source` (network share), `-InstallDir`, `-SkipService`, and refuses to run while Marvin.exe holds a lock on its own files.
 - `package.json`, `resources/icons/icon.ico`, `scripts/deploy-win.ps1`, `docs/building-and-installing.md`
 
+### EPEA-TBD-2 — Packaged app fails to start its backend, silently
+Root cause: `asar: true` packed `server/` into `app.asar` while only `server/node_modules/chromedriver/**` was unpacked. The backend runs test sequences with `spawn("node", ["run.js"])` (`server/routes/sequence.js`, `server/scheduler.js`) and sets `NODE_PATH` into `server/node_modules`, but a plain Node process cannot read inside an asar archive. Dev has no asar, which is why starting the dev server made the installed app work. `asarUnpack` is now `server/**`, and `backend-manager.js` rewrites `app.asar` to `app.asar.unpacked` when resolving the server entry point and `NODE_PATH`.
+
+Diagnosability: `startBackend` previously piped the child's output to a console a packaged app does not have, and resolved on a 10s timer regardless of outcome, so a dead backend looked like a successful start. It now appends stdout/stderr to `userData/logs/backend.log` (with a header recording the resolved entry, data dir, node_modules path and port), returns a boolean, records the last error (missing entry point, spawn failure, early exit with the stderr tail, or ready-timeout), and pre-checks that the entry point exists. `main.js` shows an error dialog naming the reason and the log path, with a button to open it, rather than letting the app open to a bare "backend not found".
+
+Also corrected the docs claim that target machines need no Node.js: `spawn("node", ...)` and the node-windows service registration both require Node on the `PATH`.
+- `package.json`, `main/backend-manager.js`, `main/main.js`, `docs/building-and-installing.md`
+
 ---
 
 ## Testing & Onboarding

@@ -41,7 +41,7 @@
     ],
     "asar": true,
     "asarUnpack": [
-      "server/node_modules/chromedriver/**"
+      "server/**"
     ]
   }
 }

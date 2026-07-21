@@ -6,9 +6,8 @@ const { execFile, exec } = require("child_process");
 const os = require("os");
 const path = require("path");
 const { getChromeBinary, getChromeVersion, isSnapChromium } = require("../utils/chromeFinder");
+const schedulerService = require("../utils/schedulerService");
 const router = express.Router();
-
-const SCHEDULER_URL = process.env.UTS_SCHEDULER_URL || "http://localhost:5050";
 
 // Run a command and resolve with { ok, version/detail }
 function checkCommand(cmd, args, parseVersion) {
@@ -130,30 +129,9 @@ router.get("/", async (req, res) => {
   }
 
   // --- Scheduler Service ---
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
-    const healthRes = await fetch(`${SCHEDULER_URL}/api/health`, { signal: controller.signal });
-    clearTimeout(timeout);
-    if (healthRes.ok) {
-      const data = await healthRes.json();
-      checks.scheduler = {
-        ok: true,
-        version: `uptime ${Math.floor(data.uptime)}s`,
-        detail: `${data.schedules} schedule(s) loaded`,
-      };
-    } else {
-      checks.scheduler = { ok: false, detail: `Service returned HTTP ${healthRes.status}` };
-    }
-  } catch (err) {
-    checks.scheduler = {
-      ok: false,
-      detail: "Service not running on " + SCHEDULER_URL,
-      hint: isWindows
-        ? "Start the scheduler service: run `node scripts/install-service-win.js` (one-off) or `node server/scheduler-service.js`."
-        : "Start the scheduler service: `sudo bash scripts/install-service-linux.sh` or `node server/scheduler-service.js`.",
-    };
-  }
+  // Probes, and if the service is down tries to start it before reporting a
+  // failure, so users are not sent to a command line for a recoverable state.
+  checks.scheduler = await schedulerService.checkWithRecovery();
 
   // --- Summary: what features are available ---
   const features = {

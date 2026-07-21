@@ -100,11 +100,11 @@
 **Description:** Extends EPEA-2489. The Scheduler Service check currently reports a failure and tells the user to run a command by hand. When the service is not responding, Marvin should attempt to start it, re-check, and only report a failure if that attempt fails.
 
 **Acceptance Criteria:**
-- [ ] AC1: When the scheduler check fails, Marvin attempts to start the service before reporting a problem.
-- [ ] AC2: After the attempt the check is re-run and the reported result reflects the retry.
-- [ ] AC3: If starting fails, the error distinguishes "not installed" from "installed but will not start" from "blocked by permissions".
-- [ ] AC4: A failed attempt never delays startup beyond a bounded timeout.
-- [ ] AC5: The SchedulePanel "service is not running" banner reflects the same retry behaviour.
+- [x] AC1: When the scheduler check fails, Marvin attempts to start the service before reporting a problem.
+- [x] AC2: After the attempt the check is re-run and the reported result reflects the retry.
+- [x] AC3: If starting fails, the error distinguishes "not installed" from "installed but will not start" from "blocked by permissions".
+- [x] AC4: A failed attempt never delays startup beyond a bounded timeout. *(15s start command, 5s grace for the port to bind.)*
+- [x] AC5: The SchedulePanel "service is not running" banner reflects the same retry behaviour. *(Proxy attempts recovery and retries the request once; response carries reason and hint.)*
 
 ---
 

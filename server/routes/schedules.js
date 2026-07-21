@@ -8,6 +8,7 @@ const fs = require("fs");
 const path = require("path");
 const router = express.Router();
 const secretsStore = require("../secrets");
+const schedulerService = require("../utils/schedulerService");
 
 const SCHEDULER_URL = process.env.UTS_SCHEDULER_URL || "http://localhost:5050";
 const TESTS_ROOT = path.join(__dirname, "../../data/repo/tests");
@@ -33,11 +34,35 @@ function gatherSecrets() {
   return s;
 }
 
+// ─── Unavailable-service handling ───
+
+// The service being down is often recoverable, so try to start it and let the
+// caller retry once before surfacing an error.
+async function handleUnavailable(res, err, retry) {
+  const attempt = await schedulerService.attemptStartThrottled();
+
+  if (attempt.started && retry) {
+    try {
+      return await retry();
+    } catch (retryErr) {
+      err = retryErr;
+    }
+  }
+
+  return res.status(503).json({
+    error: "Scheduler service is not running. Start the Marvin Scheduler Service to manage schedules.",
+    detail: err.message,
+    reason: attempt.reason,
+    hint: schedulerService.hintFor(attempt.reason),
+    attempted: !attempt.throttled,
+  });
+}
+
 // ─── Generic proxy ───
 
 async function proxy(req, res) {
   const targetUrl = `${SCHEDULER_URL}${req.originalUrl}`;
-  try {
+  const send = async () => {
     const options = { method: req.method, headers: {} };
     if (req.method !== "GET" && req.method !== "HEAD") {
       options.headers["Content-Type"] = "application/json";
@@ -58,11 +83,12 @@ async function proxy(req, res) {
 
     const data = await upstream.json();
     return res.status(upstream.status).json(data);
+  };
+
+  try {
+    return await send();
   } catch (err) {
-    return res.status(503).json({
-      error: "Scheduler service is not running. Start the Marvin Scheduler Service to manage schedules.",
-      detail: err.message,
-    });
+    return handleUnavailable(res, err, send);
   }
 }
 
@@ -95,18 +121,25 @@ async function enrichAndProxy(req, res) {
       }
     }
 
-    const upstream = await fetch(targetUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = await upstream.json();
-    return res.status(upstream.status).json(data);
+    // Only the POST is retried; bundling above is local work that cannot fail
+    // because the service is down.
+    const send = async () => {
+      const upstream = await fetch(targetUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await upstream.json();
+      return res.status(upstream.status).json(data);
+    };
+
+    try {
+      return await send();
+    } catch (err) {
+      return handleUnavailable(res, err, send);
+    }
   } catch (err) {
-    return res.status(503).json({
-      error: "Scheduler service is not running. Start the Marvin Scheduler Service to manage schedules.",
-      detail: err.message,
-    });
+    return handleUnavailable(res, err, null);
   }
 }
 

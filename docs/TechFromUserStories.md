@@ -173,6 +173,14 @@ Diagnosability: `startBackend` previously piped the child's output to a console 
 Also corrected the docs claim that target machines need no Node.js: `spawn("node", ...)` and the node-windows service registration both require Node on the `PATH`.
 - `package.json`, `main/backend-manager.js`, `main/main.js`, `docs/building-and-installing.md`
 
+### EPEA-TBD-3 — Start the scheduler service automatically when it is not running
+New `server/utils/schedulerService.js` centralises probing and recovery: `probe()` hits `/api/health` with a 3s abort, `attemptStart()` runs `Start-Service -DisplayName 'Marvin Scheduler'` on Windows (the display name, since node-windows registers a derived internal name) or `systemctl start uts-scheduler` on Linux, then re-probes on a 500ms poll for up to 5s because the start command returns before the port binds. `classifyFailure()` maps command output to `not-installed` / `permission-denied` / `will-not-start`, checking not-installed first so a "cannot find ... access is denied" message does not send the user to an admin instead of the installer. `hintFor()` gives each reason a distinct remediation.
+
+`routes/health.js` replaces its inline probe with `checkWithRecovery()`, so the diagnostics screen reports a service it managed to start as passing, flagged `autoStarted`. `routes/schedules.js` gained `handleUnavailable()`: both proxy paths now attempt a throttled start and retry the request once before returning 503, and the 503 body carries `reason` and `hint` for the SchedulePanel banner. `attemptStartThrottled()` enforces a 30s cooldown so a permanently broken service is not restarted once per request.
+
+Covered by `server/utils/schedulerService.test.js` (6 `node --test` cases over classification and hints). The tests caught a hyphenated `"not-found"` pattern that failed to match systemd's `Unit ... not found.`, which would have misreported an uninstalled service as one that will not start.
+- `server/utils/schedulerService.js`, `server/utils/schedulerService.test.js`, `server/routes/health.js`, `server/routes/schedules.js`
+
 ---
 
 ## Testing & Onboarding

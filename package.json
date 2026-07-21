@@ -39,13 +39,6 @@
       "server/**/*",
       "!server/node_modules/.cache"
     ],
-    "extraResources": [
-      {
-        "from": "resources/portable-git",
-        "to": "portable-git",
-        "filter": ["**/*"]
-      }
-    ],
     "asar": true,
     "asarUnpack": [
       "server/node_modules/chromedriver/**"

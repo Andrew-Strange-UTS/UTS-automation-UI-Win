@@ -156,8 +156,12 @@ SchedulePanel adds an ntfy topic field plus optional custom server URL (placehol
 - `server/controllers/gitController.js`, `server/routes/git.js`, `renderer/src/components/PrivateRepoCheckbox.jsx`, `renderer/src/components/PATPopup.jsx`, `renderer/src/App.jsx`
 
 ### EPEA-2511 — Windows Installer & Distribution
-`package.json` `build` config: `appId com.uts.marvin`, `productName Marvin`, NSIS Windows target (non-oneClick, user-selectable dir, custom icon), packs `main/`, `renderer/dist/`, `server/` into an asar (chromedriver unpacked), ships portable Git via `extraResources`. `predist`/`dist` scripts build the renderer, install production server deps, then run `electron-builder --win`.
-- `package.json`, `resources/portable-git/`, `resources/icons/icon.ico`
+`package.json` `build` config: `appId com.uts.marvin`, `productName Marvin`, NSIS Windows target (non-oneClick, user-selectable dir, custom icon), packs `main/`, `renderer/dist/`, `server/` into an asar (chromedriver unpacked). `predist`/`dist` scripts build the renderer, install production server deps, then run `electron-builder --win`.
+
+The install is per-machine (`perMachine: true`): it always elevates, installs to `Program Files`, and writes all-users Desktop and Start Menu shortcuts, so every account on a shared VM can launch Marvin. Per-user data stays in `%APPDATA%\Marvin`; schedules are shared machine-wide through the scheduler service's `C:\ProgramData\uts-automation` store.
+
+Git is a prerequisite on the target machine rather than bundled: `gitController` calls `simpleGit()`, which resolves `git` from the system `PATH`. An unused `extraResources` entry for `resources/portable-git` was removed, the folder was gitignored, never populated, and never referenced by any code.
+- `package.json`, `resources/icons/icon.ico`, `docs/building-and-installing.md`
 
 ---
 

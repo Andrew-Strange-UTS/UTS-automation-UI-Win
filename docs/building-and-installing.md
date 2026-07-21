@@ -54,10 +54,31 @@ Double-click the `Setup` `.exe`. Because the build sets `oneClick: false` and
 install folder. After installation, Marvin launches from its Start Menu shortcut.
 The uninstaller removes the app and shortcuts.
 
-## Scheduler service (optional)
+The build sets `perMachine: true`, so the installer always installs for **all
+users**. It prompts for administrator elevation, installs into `Program Files`,
+and writes the Desktop and Start Menu shortcuts to the all-users profile. Every
+account that logs into the machine sees the icon and can launch Marvin. A
+per-user install is not offered.
 
-To keep scheduled sequences running when the Marvin window is closed, install the
-scheduler as a Windows Service. Run once from an elevated prompt after installing:
+### What is shared and what is not
+
+Each user gets their own test repo, saved sequences, and secrets, under their own
+`%APPDATA%\Marvin` (see `getDataDir()` in `main/backend-manager.js`).
+
+Schedules are the exception: they are shared machine-wide. The Electron backend
+does not run cron jobs, it proxies all schedule operations to the scheduler
+service, which stores everything in `C:\ProgramData\uts-automation`. So every
+user sees and can edit the same set of scheduled sequences, and each schedule
+fires once regardless of how many users are logged in.
+
+Schedules carry a bundled copy of their test code, so a schedule still runs, and
+is still visible, for users whose own test repo does not contain that test.
+
+## Scheduler service (required for shared schedules)
+
+The scheduler service owns schedule storage and execution. Without it installed,
+the schedules screen has nothing to talk to and no user sees any schedules.
+Install it once per machine, from an elevated prompt after installing Marvin:
 
 ```powershell
 node scripts\install-service-win.js

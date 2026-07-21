@@ -1,6 +1,6 @@
 //client/src/component/RunSequence.js 
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { BACKEND_URL } from "@/config";
 import theme from "@/theme";
 
@@ -16,6 +16,28 @@ export default function RunSequence({
   onDryRunReport,
 }) {
   const [isRunning, setIsRunning] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
+
+  // Identifies this run to the backend so Stop has something to address. The
+  // run stream is plain text, so there is no response body to read an id from.
+  const runIdRef = useRef(null);
+
+  const handleStop = async () => {
+    if (!isRunning || isStopping) return;
+    setIsStopping(true);
+    try {
+      await fetch(`${BACKEND_URL}/api/sequence/stop`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runId: runIdRef.current }),
+      });
+      // The backend writes "=== Stopped by user ===" and closes the stream, so
+      // the reader finishes on its own and clears isRunning.
+    } catch (err) {
+      if (onSequenceLog) onSequenceLog(`❌ Could not stop the run: ${err.message}`);
+      setIsStopping(false);
+    }
+  };
 
   // OKTA environment URLs
   const oktaUrls = {
@@ -138,7 +160,12 @@ export default function RunSequence({
   // Sequence runner
   const handleRun = async () => {
     if (onBeforeRun) onBeforeRun(); // <== Clear logs BEFORE anything starts!!
+    runIdRef.current =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `run-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     setIsRunning(true);
+    setIsStopping(false);
   
 
     // Prepare backend payload for sequence
@@ -165,6 +192,7 @@ export default function RunSequence({
         testType,
         executedBy,
         accountId,
+        runId: runIdRef.current,
       }),
     });
     if (!response.ok) {
@@ -175,10 +203,12 @@ export default function RunSequence({
         if (onSequenceLog) onSequenceLog(`❌ Error: Server returned status ${response.status}`);
       }
       setIsRunning(false);
+      setIsStopping(false);
       return;
     }
     if (!response.body) {
       setIsRunning(false);
+      setIsStopping(false);
       return;
     }
     const reader = response.body.getReader();
@@ -187,6 +217,7 @@ export default function RunSequence({
       reader.read().then(({ done, value }) => {
         if (done) {
           setIsRunning(false);
+          setIsStopping(false);
           return;
         }
         const chunk = new TextDecoder().decode(value);
@@ -260,6 +291,28 @@ export default function RunSequence({
           }}
         >
           {isRunning ? "Running..." : "▶ Run Sequence"}
+        </button>
+      )}
+      {isRunning && (
+        <button
+          onClick={handleStop}
+          disabled={isStopping}
+          title="Stop the running sequence. Applications the test opened are left running."
+          style={{
+            marginTop: "10px",
+            padding: "9px 15px",
+            background: isStopping ? "#aaa" : "#dc2626",
+            color: "white",
+            border: "none",
+            borderRadius: "5px",
+            width: "100%",
+            fontSize: "14px",
+            fontWeight: "bold",
+            cursor: isStopping ? "not-allowed" : "pointer",
+            opacity: isStopping ? 0.75 : 1,
+          }}
+        >
+          {isStopping ? "Stopping..." : "■ Stop"}
         </button>
       )}
       {wrappedSequence.length > 0 && (

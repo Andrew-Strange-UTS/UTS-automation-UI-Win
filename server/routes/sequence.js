@@ -13,6 +13,43 @@ const BUILTINS_DIR = path.join(__dirname, "../builtins");
 // --- Import secrets handling utilities ---
 const secretsStore = require("../secrets");
 
+// Interactive runs currently in flight, keyed by the client-supplied run id.
+// Only interactive runs live here; scheduled runs are owned by the scheduler
+// service, which is a separate process with its own lifecycle.
+const activeRuns = new Map();
+
+/**
+ * Stop a run's process.
+ *
+ * Only Marvin's own runner is terminated. Applications the test launched (Paint,
+ * a browser) are deliberately left running, matching how tests already leave
+ * them open for inspection. The runner's PowerShell session is not killed
+ * directly either: closing the runner ends its stdin, and the session exits on
+ * its own.
+ */
+function stopChild(run) {
+  if (!run || !run.child || run.child.exitCode !== null) return false;
+
+  run.stoppedByUser = true;
+  try {
+    run.child.kill();
+  } catch {
+    return false;
+  }
+
+  // If it has not gone within a couple of seconds, insist (AC2).
+  run.forceTimer = setTimeout(() => {
+    try {
+      if (run.child.exitCode === null) run.child.kill("SIGKILL");
+    } catch {
+      // Already gone.
+    }
+  }, 2000);
+  if (run.forceTimer.unref) run.forceTimer.unref();
+
+  return true;
+}
+
 // Utility: Inject secrets into params
 function injectSecretsInParams(obj) {
   if (typeof obj === "string") {
@@ -33,7 +70,7 @@ function injectSecretsInParams(obj) {
 }
 
 router.post("/run", async (req, res) => {
-  const { sequence, parameters = {}, testType = "web", executedBy = "", accountId = "" } = req.body;
+  const { sequence, parameters = {}, testType = "web", executedBy = "", accountId = "", runId = "" } = req.body;
   if (!Array.isArray(sequence) || sequence.length === 0) {
     res.status(400).json({ error: "No tests in sequence" });
     return;
@@ -287,6 +324,11 @@ main();
       env: childEnv,
     });
 
+    // Register the run so POST /stop can find it. The client supplies the id,
+    // which avoids having to parse one back out of a plain-text stream.
+    const run = { child, stoppedByUser: false };
+    if (runId) activeRuns.set(runId, run);
+
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
       res.write(chunk);
@@ -307,14 +349,23 @@ main();
       res.end();
     });
     child.on("close", (code, signal) => {
-      res.write(
-        `\n=== Sequence finished with code ${code}, signal "${signal}" ===\n[search folder] ${seqDir}\n`
-      );
+      if (runId) activeRuns.delete(runId);
+      if (run.forceTimer) clearTimeout(run.forceTimer);
+
+      // A user-requested stop is a distinct outcome, not a pass or a failure.
+      if (run.stoppedByUser) {
+        res.write(`\n=== Stopped by user ===\n[search folder] ${seqDir}\n`);
+      } else {
+        res.write(
+          `\n=== Sequence finished with code ${code}, signal "${signal}" ===\n[search folder] ${seqDir}\n`
+        );
+      }
       res.end();
     });
     req.on("close", () => {
-      child.kill();
-      res.write("\n[Client disconnected, killed child process]\n");
+      if (runId) activeRuns.delete(runId);
+      // AC7: closing the window stops the run the same way the button does.
+      stopChild(run);
       res.end();
     });
   } catch (e) {
@@ -325,5 +376,27 @@ main();
     res.end();
   }
 });
+
+// Stop a running sequence. With a runId, stops that run; without one, stops
+// every interactive run, which is what a "stop everything" button wants.
+// Stopping when nothing is running is a no-op, not an error (AC6).
+router.post("/stop", (req, res) => {
+  const { runId } = req.body || {};
+
+  const targets = runId
+    ? [activeRuns.get(runId)].filter(Boolean)
+    : [...activeRuns.values()];
+
+  let stopped = 0;
+  for (const run of targets) {
+    if (stopChild(run)) stopped += 1;
+  }
+
+  res.json({ stopped, running: activeRuns.size - stopped });
+});
+
+// Test seam: process termination is the part worth testing against a real
+// child process rather than a mock.
+router.__test = { stopChild, activeRuns };
 
 module.exports = router;

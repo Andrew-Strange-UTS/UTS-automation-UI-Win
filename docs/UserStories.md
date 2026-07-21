@@ -273,6 +273,22 @@
 
 ---
 
+### EPEA-TBD-5 — Stop a running sequence from the Run Sequence panel `5 pts`
+
+**Description:** A running sequence can only be stopped by closing the app or waiting it out. Add a Stop control to the Run Sequence sidebar that halts the run and marks the log accordingly. Applications the test opened (Paint, a browser) are deliberately left running, matching how tests already leave them open for inspection.
+
+**Acceptance Criteria:**
+- [x] AC1: A Stop button is visible in the Run Sequence sidebar, enabled only while a sequence is running.
+- [x] AC2: Clicking Stop halts the run within ~2 seconds.
+- [x] AC3: Marvin's own runner process is terminated. Applications the test launched are left running, not killed.
+- [x] AC4: The run log ends with a clear "Stopped by user" marker, distinct from a pass or a failure.
+- [x] AC5: The UI returns to idle so a new sequence can be started straight away.
+- [x] AC6: Stopping when nothing is running is a harmless no-op.
+- [x] AC7: Closing the window or losing the connection stops the run the same way.
+- [x] AC8: A stopped run does not post a pass/fail result to Zephyr.
+
+---
+
 ## Web Runner
 
 ### EPEA-2500 — Selenium web runner with Chrome auto-detection `13 pts`

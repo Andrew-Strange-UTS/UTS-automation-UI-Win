@@ -15,8 +15,10 @@
 [CmdletBinding()]
 param(
     # Packaged app produced by `npm run dist` (the build succeeds up to this point
-    # even when the NSIS step fails).
-    [string] $Source = (Join-Path $PSScriptRoot "..\dist\win-unpacked"),
+    # even when the NSIS step fails). Defaults to ..\dist\win-unpacked relative to
+    # this script; resolved in the body, since $PSScriptRoot is not reliably
+    # populated while param() defaults are evaluated.
+    [string] $Source,
 
     [string] $InstallDir = (Join-Path $env:ProgramFiles "Marvin"),
 
@@ -49,6 +51,15 @@ function New-Shortcut {
 
 Assert-Elevated
 
+# $PSScriptRoot is empty in some hosts; fall back to the invocation path, then cwd.
+$scriptDir = $PSScriptRoot
+if (-not $scriptDir) { $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path }
+if (-not $scriptDir) { $scriptDir = (Get-Location).Path }
+
+if (-not $Source) { $Source = Join-Path $scriptDir "..\dist\win-unpacked" }
+if (-not (Test-Path $Source)) {
+    throw "Source folder '$Source' not found. Run 'npm run dist' first, or pass -Source explicitly."
+}
 $Source = (Resolve-Path $Source).Path
 $exeSource = Join-Path $Source "Marvin.exe"
 if (-not (Test-Path $exeSource)) {
@@ -90,10 +101,9 @@ Write-Host "  $commonDesktop\Marvin.lnk"
 Write-Host "  $commonPrograms\Marvin.lnk"
 
 if (-not $SkipService) {
-    $installService = Join-Path $InstallDir "resources\app.asar.unpacked\scripts\install-service-win.js"
-    if (-not (Test-Path $installService)) {
-        $installService = Join-Path $PSScriptRoot "install-service-win.js"
-    }
+    # scripts/ is not in the electron-builder `files` list, so it is not inside
+    # win-unpacked. The copy next to this script is the one that normally exists.
+    $installService = Join-Path $scriptDir "install-service-win.js"
 
     if (Test-Path $installService) {
         Write-Host "`nRegistering the Marvin Scheduler service..."

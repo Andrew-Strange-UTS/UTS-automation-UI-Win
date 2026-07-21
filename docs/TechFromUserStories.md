@@ -161,7 +161,9 @@ SchedulePanel adds an ntfy topic field plus optional custom server URL (placehol
 The install is per-machine (`perMachine: true`): it always elevates, installs to `Program Files`, and writes all-users Desktop and Start Menu shortcuts, so every account on a shared VM can launch Marvin. Per-user data stays in `%APPDATA%\Marvin`; schedules are shared machine-wide through the scheduler service's `C:\ProgramData\uts-automation` store.
 
 Git is a prerequisite on the target machine rather than bundled: `gitController` calls `simpleGit()`, which resolves `git` from the system `PATH`. An unused `extraResources` entry for `resources/portable-git` was removed, the folder was gitignored, never populated, and never referenced by any code.
-- `package.json`, `resources/icons/icon.ico`, `docs/building-and-installing.md`
+
+`scripts/deploy-win.ps1` is a fallback deployment path for build machines whose security policy blocks the downloaded `makensis.exe` from executing (seen as `spawn EPERM`, and as symlink/extraction failures unpacking the NSIS toolchain). Packaging up to `dist/win-unpacked` still succeeds there, so the script installs that folder directly: elevation check, copy to `%ProgramFiles%\Marvin`, all-users shortcuts via `CommonDesktopDirectory`/`CommonPrograms`, then scheduler service registration. Supports `-Source` (network share), `-InstallDir`, `-SkipService`, and refuses to run while Marvin.exe holds a lock on its own files.
+- `package.json`, `resources/icons/icon.ico`, `scripts/deploy-win.ps1`, `docs/building-and-installing.md`
 
 ---
 

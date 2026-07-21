@@ -83,6 +83,32 @@ fires once regardless of how many users are logged in.
 Schedules carry a bundled copy of their test code, so a schedule still runs, and
 is still visible, for users whose own test repo does not contain that test.
 
+## Alternative: deploy without the NSIS installer
+
+On a locked-down build machine, `npm run dist` can fail at the NSIS step with
+`spawn EPERM` or a plugin/extraction error, because security policy blocks the
+downloaded `makensis.exe` from executing. The packaging step before it still
+succeeds, so `dist\win-unpacked` contains a complete, working app.
+
+`scripts\deploy-win.ps1` installs that folder machine-wide, doing the same job as
+the NSIS installer. Run it from an elevated PowerShell on the target machine:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\deploy-win.ps1
+```
+
+It copies the app to `C:\Program Files\Marvin`, creates Desktop and Start Menu
+shortcuts in the all-users profiles, and registers the scheduler service. Point
+`-Source` at a network share to deploy one build to many VMs:
+
+```powershell
+... -File scripts\deploy-win.ps1 -Source \\server\share\marvin\win-unpacked
+```
+
+Close Marvin on every logged-in session first, a running instance locks its own
+files and the copy will fail. To uninstall, delete the install directory and the
+two `.lnk` files the script reports.
+
 ## Scheduler service (required for shared schedules)
 
 The scheduler service owns schedule storage and execution. Without it installed,

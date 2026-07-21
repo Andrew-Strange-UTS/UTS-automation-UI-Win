@@ -91,7 +91,7 @@
 - [x] AC2: If the backend child fails to spawn or exits early, the error is captured rather than swallowed by the 10s timeout.
 - [x] AC3: The UI shows the actual reason the backend is unavailable plus the log file path, instead of a generic "backend not found".
 - [x] AC4: The root cause of the fork failing in the packaged app is identified and fixed. *(server/ was packed into app.asar, but the backend spawns plain `node` processes that cannot read an asar archive; server/ is now unpacked.)*
-- [ ] AC5: The installed app starts its own backend with no dev server running. *(Awaiting verification on the target VM.)*
+- [x] AC5: The installed app starts its own backend with no dev server running. *(Verified on the target VM: test 06 runs end to end from the installed app.)*
 
 ---
 
@@ -121,7 +121,7 @@
 - [x] AC4: The session is torn down at the end of a run, including on failure.
 - [x] AC5: If the session dies mid-run it is restarted transparently rather than failing the test.
 - [x] AC6: A per-action timeout is retained, so a hung command cannot hang the run.
-- [ ] AC7: Measured improvement is recorded against test 06 on the target VM.
+- [x] AC7: Measured improvement is recorded against test 06 on the target VM. *(Confirmed fixed on the installed app. Baseline before the change: 11100ms per drag, 725s total draw; dev at the time was 1350ms per drag, 105s total.)*
 
 ---
 

@@ -10,5 +10,7 @@ resources/portable-git/
 user-secrets/
 schedules/
 tmp/
+# node-windows writes its service wrapper here when the scheduler is installed
+server/daemon/
 data/
 .claude/

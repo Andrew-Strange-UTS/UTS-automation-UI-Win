@@ -11,11 +11,34 @@ const path = require("path");
 
 // ─── Tesseract worker (lazy init, reused across calls) ───
 
+// Language models ship with the app. Without an explicit langPath, tesseract.js
+// downloads the model from a CDN on first use and caches it in the process's
+// working directory — which needs internet access, and write access to a
+// directory that is Program Files for an installed app. Both fail on a locked
+// down machine, and only when OCR actually runs.
+const TESSDATA_DIR = path.join(__dirname, "..", "tessdata");
+
 let tesseractWorker = null;
 
 async function getWorker(lang = "eng") {
   if (!tesseractWorker) {
-    tesseractWorker = await createWorker(lang);
+    const model = path.join(TESSDATA_DIR, `${lang}.traineddata`);
+    if (!fs.existsSync(model)) {
+      throw new Error(
+        `Tesseract language model not found: ${model}\n` +
+          `Expected a '${lang}.traineddata' file in ${TESSDATA_DIR}. ` +
+          `Only 'eng' ships with Marvin; add the model file to use another language.`
+      );
+    }
+
+    tesseractWorker = await createWorker(lang, undefined, {
+      langPath: TESSDATA_DIR,
+      // The bundled model is uncompressed, the CDN serves .gz.
+      gzip: false,
+      // Nothing to cache: read the bundled model directly, so no writes are
+      // attempted into a possibly read-only install directory.
+      cacheMethod: "none",
+    });
   }
   return tesseractWorker;
 }

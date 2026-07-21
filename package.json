@@ -37,7 +37,8 @@
       "main/**/*",
       "renderer/dist/**/*",
       "server/**/*",
-      "!server/node_modules/.cache"
+      "!server/node_modules/.cache",
+      "!server/daemon"
     ],
     "asar": true,
     "asarUnpack": [

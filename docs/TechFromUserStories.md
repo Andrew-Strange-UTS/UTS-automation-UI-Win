@@ -68,8 +68,10 @@ Built-in Notepad sample (launch, type, verify title, close without saving) with 
 - `server/utils/image-utils.js`, `server/runners/desktop-runner.js`
 
 ### EPEA-2497 — OCR, read text from screen region
-`readText` screenshots (or crops a region, or captures a window) then runs `ocrImage`, which on Windows defaults to the native **Windows.Media.Ocr** engine via WinRT PowerShell interop (`BitmapDecoder` → `SoftwareBitmap` → `OcrEngine.RecognizeAsync`), falling back to **Tesseract.js** (lazily-reused worker, `eng`, optional jimp preprocessing, PSM/whitelist) on non-Windows or Windows-OCR failure. `eng.traineddata` is the bundled Tesseract model; `scripts/test-winocr.ps1` is a standalone Windows-OCR probe.
-- `server/runners/desktop-runner.js`, `server/utils/image-utils.js`, `eng.traineddata`, `scripts/test-winocr.ps1`
+`readText` screenshots (or crops a region, or captures a window) then runs `ocrImage`, which on Windows defaults to the native **Windows.Media.Ocr** engine via WinRT PowerShell interop (`BitmapDecoder` → `SoftwareBitmap` → `OcrEngine.RecognizeAsync`), falling back to **Tesseract.js** (lazily-reused worker, `eng`, optional jimp preprocessing, PSM/whitelist) on non-Windows or Windows-OCR failure. `server/tessdata/eng.traineddata` is the bundled Tesseract model; `scripts/test-winocr.ps1` is a standalone Windows-OCR probe.
+
+`getWorker` passes `langPath` (the bundled `server/tessdata`), `gzip: false` (the bundled copy is uncompressed, the CDN serves `.gz`) and `cacheMethod: "none"`. Without those, tesseract.js downloads the model from a CDN on first use and caches it in the process working directory, which needs both internet access and write access to what is `Program Files` for an installed app. Neither holds on a locked-down VM, and it only surfaces when OCR actually runs. A missing model now raises a clear error naming the expected path rather than silently attempting a download. Previously the file sat untracked in the repo root as a download artifact, and was never packaged despite the docs claiming it was bundled.
+- `server/runners/desktop-runner.js`, `server/utils/image-utils.js`, `server/tessdata/eng.traineddata`, `scripts/test-winocr.ps1`
 
 ### EPEA-2498 — Wait for image / wait for text (polling assertions)
 Both are JS polling loops on `driver.pause`: `waitForImage` repeatedly calls `findImage` until `match.found` or timeout (default 10000ms / 1000ms interval); `waitForText` repeatedly calls `readText` and checks substring (or `exact`, case-insensitive). Both throw on timeout.

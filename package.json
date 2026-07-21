@@ -37,8 +37,18 @@
       "main/**/*",
       "renderer/dist/**/*",
       "server/**/*",
-      "!server/node_modules/.cache",
+      "!server/node_modules",
       "!server/daemon"
+    ],
+    "extraResources": [
+      {
+        "from": "server/node_modules",
+        "to": "app/server/node_modules",
+        "filter": [
+          "**/*",
+          "!.cache/**"
+        ]
+      }
     ],
     "asar": false
   }

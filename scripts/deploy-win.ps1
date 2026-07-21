@@ -66,6 +66,21 @@ if (-not (Test-Path $exeSource)) {
     throw "No Marvin.exe under '$Source'. Run 'npm run dist' first - the packaging step succeeds even if the NSIS installer step fails."
 }
 
+# electron-builder copies node_modules from the root package.json's production
+# dependency tree, not by glob, so the server's dependencies are easy to lose
+# from a build. Catch that here rather than after installing.
+$serverModules = Join-Path $Source "resources\app\server\node_modules"
+if (-not (Test-Path (Join-Path $serverModules "express"))) {
+    throw @"
+The build at '$Source' is missing the backend's dependencies:
+  $serverModules
+
+Marvin would install but its backend would not start. Rebuild with:
+  cd server; npm install --production; cd ..
+  npm run dist
+"@
+}
+
 # Marvin.exe holds a lock on its own files, so a running instance breaks the copy.
 $running = Get-Process -Name "Marvin" -ErrorAction SilentlyContinue
 if ($running) {

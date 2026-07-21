@@ -160,14 +160,37 @@ async function findImageOnScreen(haystackPath, needlePath, options = {}) {
   const nGray = toGrayscale(needle);
 
   const hW = hGray.width;
+  const hH = hGray.height;
   const nW = nGray.width;
   const nH = nGray.height;
+
+  // Matching is fixed-scale normalised cross-correlation, so a reference image
+  // captured at a different resolution or DPI scaling than the live screen will
+  // not match. Report the dimensions on every result so that is diagnosable
+  // from the run log rather than looking like a missing element.
+  const dimensions = {
+    searchArea: { width: hW, height: hH },
+    reference: { width: nW, height: nH },
+  };
+
+  // A reference bigger than the area being searched cannot match at any
+  // position. This is the classic symptom of capturing on a higher-resolution
+  // display than the one under test.
+  if (nW > hW || nH > hH) {
+    return {
+      found: false,
+      reason:
+        `Reference image (${nW}x${nH}) is larger than the search area (${hW}x${hH}). ` +
+        `Re-capture the reference on the machine the test runs against.`,
+      ...dimensions,
+    };
+  }
 
   // Precompute needle stats
   const needleStats = computeMeanAndStd(nGray.data, 0, 0, nW, nH, nW);
   if (needleStats.std < 1) {
     // Needle is a solid colour — can't do NCC meaningfully
-    return { found: false, reason: "Needle image is a solid colour" };
+    return { found: false, reason: "Needle image is a solid colour", ...dimensions };
   }
 
   let bestScore = -1;
@@ -227,10 +250,11 @@ async function findImageOnScreen(haystackPath, needlePath, options = {}) {
       centerX: bestX + offsetX + Math.floor(nW / 2),
       centerY: bestY + offsetY + Math.floor(nH / 2),
       confidence: bestScore,
+      ...dimensions,
     };
   }
 
-  return { found: false, confidence: bestScore };
+  return { found: false, confidence: bestScore, threshold, ...dimensions };
 }
 
 module.exports = {

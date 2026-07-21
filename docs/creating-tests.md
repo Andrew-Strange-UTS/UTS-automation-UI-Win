@@ -285,6 +285,43 @@ your-test-repo/
 
 Reference images should be small, tightly cropped screenshots of the UI element you want to find. Smaller images = faster matching.
 
+### Reference images must match the target screen resolution
+
+This is the most common reason image matching fails.
+
+Matching compares pixels at a **fixed scale**. It does not resize the reference image looking for a match. So a reference captured on a screen at one resolution or DPI scaling will not match the same UI element rendered at another, every pixel has moved and the element is a different size.
+
+In practice this means:
+
+- **Capture reference images on the machine the test will run on**, at the resolution it will run at. A reference grabbed on your 2560x1440 laptop will not match on a 1920x1080 VM.
+- **Windows display scaling counts.** The same monitor at 100% and at 150% scaling produces different pixel sizes for the same button. Match the scaling too, not just the resolution.
+- **Keep the VM's resolution stable.** If the VM's resolution can change (some remote-desktop and Citrix sessions resize to fit the client window), reference images captured in one session may fail in the next.
+- **Re-capture, do not rescale.** Resizing a reference image in an editor introduces interpolation artefacts and generally makes matching worse, not better.
+
+To re-capture against the target machine, run a test there that saves a screenshot, then crop the element out of that file:
+
+```js
+// Save a full screenshot from the machine under test, then crop your
+// reference images out of it so they are pixel-accurate for that screen.
+await driver.screenshot("C:\\temp\\full-screen.png");
+```
+
+If a match fails, the error reports both sizes so a mismatch is obvious:
+
+```
+Image "ok-button.png" not found on screen. Best confidence 0.42 (threshold 0.85).
+Searched a 1920x1080 area for a 96x32 reference. Reference images must be
+captured at the same screen resolution and DPI scaling as the machine running
+the test.
+```
+
+A reference larger than the screen is reported explicitly, since that can never match:
+
+```
+Reference image (128x48) is larger than the search area (96x32).
+Re-capture the reference on the machine the test runs against.
+```
+
 ### Image Driver API
 
 | Method | Description |
@@ -295,6 +332,8 @@ Reference images should be small, tightly cropped screenshots of the UI element 
 | `driver.clickImage("ok-button.png", options?)` | Find the image on screen and click its center. Throws if not found. |
 | `driver.waitForText("expected text", region?, options?)` | Poll OCR until the expected text appears on screen. Throws if not found within timeout. |
 | `driver.screenshotRegion(outputPath, region)` | Capture a specific screen region and save to file. |
+
+`findImage` also returns `searchArea` and `reference` (`{ width, height }` each), so a run log always records the resolution the test actually observed.
 
 **Options for `findImage` / `clickImage`:**
 - `threshold` — Match confidence threshold, 0 to 1 (default: `0.85`)

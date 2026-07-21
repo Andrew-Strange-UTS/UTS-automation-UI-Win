@@ -184,10 +184,10 @@
 **Description:** Image recognition compares reference images pixel-for-pixel against a screenshot of the live screen. A reference captured on a display with a different resolution or DPI scaling than the machine running the test will match unreliably or not at all. Document this for test authors and make a resolution mismatch diagnosable from the run log.
 
 **Acceptance Criteria:**
-- [ ] AC1: `docs/creating-tests.md` states that reference images must be captured at the same resolution and DPI scaling as the screen Marvin runs against.
-- [ ] AC2: Guidance covers the common failure case of capturing locally then running on a VM at a different resolution.
-- [ ] AC3: A failed image match logs the screen resolution the test observed, so a mismatch is diagnosable.
-- [ ] AC4: The docs explain how to re-capture reference images against the target machine.
+- [x] AC1: `docs/creating-tests.md` states that reference images must be captured at the same resolution and DPI scaling as the screen Marvin runs against.
+- [x] AC2: Guidance covers the common failure case of capturing locally then running on a VM at a different resolution.
+- [x] AC3: A failed image match logs the screen resolution the test observed, so a mismatch is diagnosable. *(`findImage` returns `searchArea`/`reference` dimensions; failures name both.)*
+- [x] AC4: The docs explain how to re-capture reference images against the target machine.
 
 ---
 

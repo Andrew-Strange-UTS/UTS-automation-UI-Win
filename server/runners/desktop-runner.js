@@ -10,6 +10,37 @@ const fs = require("fs");
 const { cropAndSave, ocrFromImage, findImageOnScreen, terminateWorker } = require("../utils/image-utils");
 
 /**
+ * Explains a failed image match in terms the test author can act on.
+ *
+ * Image matching is fixed-scale, so the most common cause of a miss is a
+ * reference captured at a different screen resolution or DPI scaling than the
+ * machine under test. Reporting both sets of dimensions makes that visible
+ * instead of it looking like the element was simply absent.
+ */
+function describeImageMiss(match) {
+  if (!match) return "No match result was captured.";
+  if (match.reason) return match.reason;
+
+  const parts = [];
+  if (typeof match.confidence === "number") {
+    const threshold = typeof match.threshold === "number" ? match.threshold : 0.85;
+    parts.push(
+      `Best confidence ${match.confidence.toFixed(2)} (threshold ${threshold.toFixed(2)}).`
+    );
+  }
+  if (match.searchArea && match.reference) {
+    parts.push(
+      `Searched a ${match.searchArea.width}x${match.searchArea.height} area ` +
+        `for a ${match.reference.width}x${match.reference.height} reference.`
+    );
+    parts.push(
+      "Reference images must be captured at the same screen resolution and DPI scaling as the machine running the test."
+    );
+  }
+  return parts.join(" ");
+}
+
+/**
  * Creates a desktop automation context that test scripts receive as `driver`.
  * Uses PowerShell under the hood for keyboard, mouse, and window operations.
  * @param {object} options
@@ -738,21 +769,28 @@ $bitmap.Dispose();
       const timeout = options.timeout || 10000;
       const interval = options.interval || 1000;
       const start = Date.now();
+      let lastMatch = null;
 
       while (Date.now() - start < timeout) {
         const match = await driver.findImage(referenceImage, options);
         if (match.found) return match;
+        lastMatch = match;
         await driver.pause(interval);
       }
 
-      throw new Error(`Image "${referenceImage}" not found on screen within ${timeout}ms`);
+      throw new Error(
+        `Image "${referenceImage}" not found on screen within ${timeout}ms. ` +
+          describeImageMiss(lastMatch)
+      );
     },
 
     // --- Image: Find image and click its center ---
     async clickImage(referenceImage, options = {}) {
       const match = await driver.findImage(referenceImage, options);
       if (!match.found) {
-        throw new Error(`Image "${referenceImage}" not found on screen (confidence: ${match.confidence?.toFixed(2)})`);
+        throw new Error(
+          `Image "${referenceImage}" not found on screen. ${describeImageMiss(match)}`
+        );
       }
       const clickX = match.centerX + (options.offsetX || 0);
       const clickY = match.centerY + (options.offsetY || 0);

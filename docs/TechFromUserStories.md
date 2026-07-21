@@ -165,6 +165,14 @@ Git is a prerequisite on the target machine rather than bundled: `gitController`
 `scripts/deploy-win.ps1` is a fallback deployment path for build machines whose security policy blocks the downloaded `makensis.exe` from executing (seen as `spawn EPERM`, and as symlink/extraction failures unpacking the NSIS toolchain). Packaging up to `dist/win-unpacked` still succeeds there, so the script installs that folder directly: elevation check, copy to `%ProgramFiles%\Marvin`, all-users shortcuts via `CommonDesktopDirectory`/`CommonPrograms`, then scheduler service registration. Supports `-Source` (network share), `-InstallDir`, `-SkipService`, and refuses to run while Marvin.exe holds a lock on its own files.
 - `package.json`, `resources/icons/icon.ico`, `scripts/deploy-win.ps1`, `docs/building-and-installing.md`
 
+### EPEA-TBD-1 — Reference images must match the target screen resolution
+`findImageOnScreen` is fixed-scale normalised cross-correlation, so a reference captured at a different resolution or DPI scaling than the live screen cannot match. Every result (hit or miss) now carries `searchArea` and `reference` dimensions, misses also carry the `threshold`, and a reference larger than the search area short-circuits with an explicit reason instead of falling through the scan loops and returning a meaningless `confidence: -1`. `describeImageMiss()` in `desktop-runner.js` turns that into an author-facing message naming both sizes and the resolution requirement; `clickImage` and `waitForImage` both use it, and `waitForImage` keeps the last attempt so its timeout message is specific rather than bare.
+
+Docs gained a "Reference images must match the target screen resolution" section covering Windows display scaling, resolution-changing Citrix/RDP sessions, why rescaling in an editor makes matching worse, and how to re-capture against the target machine.
+
+Covered by `server/utils/image-utils.test.js` (3 `node --test` cases over oversized-reference reporting, normal-miss diagnostics, and dimensions on a successful match).
+- `server/utils/image-utils.js`, `server/utils/image-utils.test.js`, `server/runners/desktop-runner.js`, `docs/creating-tests.md`
+
 ### EPEA-TBD-2 — Packaged app fails to start its backend, silently
 Root cause: `asar: true` packed `server/` into `app.asar` while only `server/node_modules/chromedriver/**` was unpacked. The backend runs test sequences with `spawn("node", ["run.js"])` (`server/routes/sequence.js`, `server/scheduler.js`) and sets `NODE_PATH` into `server/node_modules`, but a plain Node process cannot read inside an asar archive. Dev has no asar, which is why starting the dev server made the installed app work. `asarUnpack` is now `server/**`, and `backend-manager.js` rewrites `app.asar` to `app.asar.unpacked` when resolving the server entry point and `NODE_PATH`.
 

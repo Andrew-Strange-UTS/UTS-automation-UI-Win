@@ -60,8 +60,29 @@ module.exports = async function (driver, parameters = {}, zephyrLog) {
     // SendKeys interprets {ENTER} as Enter — convert newlines so paragraphs land cleanly.
     const sendable = fullText.replace(/\r\n/g, "\n").replace(/\n/g, "{ENTER}");
     const CHUNK = 400;
-    for (let i = 0; i < sendable.length; i += CHUNK) {
-      await driver.type(sendable.slice(i, i + CHUNK));
+    // Chunk without ever splitting a {ENTER} token: a chunk ending mid-token
+    // (e.g. "...{EN") is an unmatched brace and SendKeys throws
+    // "Keyword delimiter is missing". Split into atomic pieces (literal runs
+    // capped at CHUNK, plus whole {ENTER} tokens), then pack pieces into chunks.
+    const atoms = [];
+    for (const part of sendable.split(/(\{ENTER\})/).filter(Boolean)) {
+      if (part === "{ENTER}") {
+        atoms.push(part);
+      } else {
+        for (let i = 0; i < part.length; i += CHUNK) atoms.push(part.slice(i, i + CHUNK));
+      }
+    }
+    let chunk = "";
+    for (const atom of atoms) {
+      if (chunk && chunk.length + atom.length > CHUNK) {
+        await driver.type(chunk);
+        await driver.pause(80);
+        chunk = "";
+      }
+      chunk += atom;
+    }
+    if (chunk) {
+      await driver.type(chunk);
       await driver.pause(80);
     }
     zephyrLog("Typed passage into Notepad.", "Pass");

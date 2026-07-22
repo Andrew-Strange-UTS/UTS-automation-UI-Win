@@ -110,6 +110,19 @@
 
 ## Desktop Driver
 
+### EPEA-TBD-7 — Backend must not collide on a fixed port for a second VM user `5 pts`
+
+**Description:** The backend bound a fixed port 5000 and the renderer hardcoded `http://localhost:5000`. On a shared VM, only one process per machine can bind a port, so when a second user launched Marvin while the first still had it open, their backend failed with `EADDRINUSE` and the app reported "backend did not start". The backend now binds an OS-assigned free port and the renderer is told which one at runtime.
+
+**Acceptance Criteria:**
+- [x] AC1: The backend binds an OS-assigned free port (`PORT=0`), not a fixed 5000.
+- [x] AC2: The backend reports its actual port back to the Electron main process.
+- [x] AC3: The renderer learns the port at runtime (via preload) instead of hardcoding it; HTTP and WebSocket both use it.
+- [x] AC4: Two users running Marvin on the same VM each get their own backend on distinct ports, with no collision.
+- [ ] AC5: Verified on the VM: the second user's app starts and runs a test. *(Awaiting confirmation.)*
+
+---
+
 ### EPEA-TBD-4 — Reuse a persistent PowerShell session for desktop actions `8 pts`
 
 **Description:** Every desktop driver action spawned `cmd.exe` then `powershell.exe`. Measured on the target VM, that cost ~11.1s per action for the installed app and ~1.35s in dev, flat regardless of how much work the action did, so a 60-drag test took 12 minutes installed against 105s in dev. The cost is process creation, not the work, so one long-lived PowerShell process now serves a whole run.

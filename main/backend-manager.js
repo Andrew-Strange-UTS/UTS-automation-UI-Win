@@ -7,6 +7,15 @@ const { app } = require("electron");
 let backendProcess = null;
 let logStream = null;
 
+// The port the backend actually bound, learned from its ready message. Null
+// until the backend reports ready. The renderer is told this at window
+// creation, so it must never be hardcoded.
+let backendPort = null;
+
+function getBackendPort() {
+  return backendPort;
+}
+
 // Why the backend is unavailable, for the UI to show instead of a bare
 // "backend not found". Null once the backend reports ready.
 let lastError = null;
@@ -63,9 +72,11 @@ function writeLog(text) {
   }
 }
 
-function startBackend(port) {
+// port: a preferred port, or 0 (the default) to let the OS assign a free one.
+function startBackend(port = 0) {
   return new Promise((resolve) => {
     lastError = null;
+    backendPort = null;
 
     const serverEntry = resolveUnpacked(path.join(__dirname, "..", "server", "index.js"));
     const dataDir = getDataDir();
@@ -146,9 +157,12 @@ function startBackend(port) {
     });
 
     backendProcess.on("message", (msg) => {
-      if (msg === "ready") {
-        console.log(`[backend] Server ready on port ${port}`);
-        writeLog(`[ready] listening on port ${port}\n`);
+      // The backend reports { type: "ready", port } once it is listening.
+      const isReady = msg === "ready" || (msg && msg.type === "ready");
+      if (isReady) {
+        backendPort = (msg && msg.port) || port || null;
+        console.log(`[backend] Server ready on port ${backendPort}`);
+        writeLog(`[ready] listening on port ${backendPort}\n`);
         lastError = null;
         settle(true);
       }
@@ -203,4 +217,4 @@ function stopBackend() {
   }
 }
 
-module.exports = { startBackend, stopBackend, getLastError, getLogPath };
+module.exports = { startBackend, stopBackend, getLastError, getLogPath, getBackendPort };

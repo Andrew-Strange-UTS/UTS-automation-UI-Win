@@ -7,6 +7,7 @@ const {
   stopBackend,
   getLastError,
   getLogPath,
+  getBackendPort,
 } = require("./backend-manager");
 
 // AC2: ensure the packaged Linux app also runs without the Chromium sandbox
@@ -16,7 +17,8 @@ if (process.platform === "linux") {
 }
 
 const isDev = !app.isPackaged;
-const BACKEND_PORT = 5000;
+// The backend picks a free port at runtime (see backend-manager). A fixed port
+// collides when a second user runs Marvin on the same shared VM.
 
 // Splash/readiness tuning
 const HEALTH_POLL_INTERVAL_MS = 300;
@@ -140,6 +142,9 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      // Hand the renderer the backend's actual port. preload reads this and
+      // exposes it, so the renderer never hardcodes a port.
+      additionalArguments: [`--backend-port=${getBackendPort() || ""}`],
     },
   };
 
@@ -216,8 +221,8 @@ function destroySplash() {
 }
 
 // Poll the backend health endpoint until it responds OK or we time out.
-function waitForBackendHealth() {
-  const url = `http://localhost:${BACKEND_PORT}/api/health`;
+function waitForBackendHealth(port) {
+  const url = `http://localhost:${port}/api/health`;
   const deadline = Date.now() + HEALTH_TIMEOUT_MS;
 
   return new Promise((resolve) => {
@@ -271,11 +276,12 @@ app.whenReady().then(async () => {
   // Show the splash immediately so the user has feedback while we start up.
   createSplash();
 
-  // Start the Express backend
-  const started = await startBackend(BACKEND_PORT);
+  // Start the Express backend on an OS-assigned free port.
+  const started = await startBackend(0);
+  const port = getBackendPort();
 
   // Additional readiness gate: wait for the health endpoint (bounded timeout).
-  const healthy = await waitForBackendHealth();
+  const healthy = port ? await waitForBackendHealth(port) : false;
 
   // Without this the app opens to a generic "backend not found" and the real
   // reason sits in a console that a packaged app does not have.

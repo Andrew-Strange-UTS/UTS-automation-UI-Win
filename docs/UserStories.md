@@ -392,6 +392,20 @@
 
 ---
 
+### EPEA-TBD-6 — Protect bundled schedule secrets at rest on a shared VM `5 pts`
+
+**Description:** When a user creates a schedule, their decrypted secrets are bundled into it (the LocalSystem scheduler service cannot reach a user's per-user secret store at run time, so it needs its own copy). Those secrets were stored as plaintext in the shared `C:\ProgramData\uts-automation\schedules.json`. On a shared VM, default ProgramData ACLs let any standard user read that file, so one user could recover another's Okta/Zephyr/GitHub credentials. Encrypt the bundled secrets at rest with the service's machine key, and lock the shared data directory down to SYSTEM and Administrators.
+
+**Acceptance Criteria:**
+- [x] AC1: Bundled secrets are stored encrypted (AES-256-GCM, service machine key), not as plaintext, in `schedules.json`.
+- [x] AC2: Schedules still run: the service decrypts bundled secrets at execution time.
+- [x] AC3: Existing plaintext schedules are migrated to the encrypted form on startup.
+- [x] AC4: The shared data directory ACL is restricted to SYSTEM and Administrators, so a standard user cannot read the files directly. *(Best-effort icacls at service startup on Windows; logged if it cannot be applied.)*
+- [x] AC5: The API still never returns bundled secrets (encrypted or plaintext) in a schedule response.
+- [ ] AC6: The export endpoint still exposes secrets to any local user by design; closing that requires per-user schedule ownership, tracked separately. *(Documented, not fixed here.)*
+
+---
+
 ## Reporting & Notifications
 
 ### EPEA-2507 — Zephyr Scale result reporting per test `5 pts`

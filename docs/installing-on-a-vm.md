@@ -41,10 +41,17 @@ Understanding this up front avoids surprises on a shared VM.
   are logged in. Schedules carry a bundled copy of their test code, so a
   schedule still runs for a user whose own test repo does not contain that test.
 
-> **Security note.** A schedule is created with the creating user's decrypted
-> secrets bundled into it, and any other logged-in user can read those back
-> through the shared scheduler. Only deploy the shared scheduler on a VM where
-> everyone is equally trusted with everyone else's secrets.
+> **Security note.** A schedule carries the creating user's secrets so the
+> service can run it. Those secrets are **encrypted at rest** with a machine key,
+> and the scheduler service **restricts its data directory
+> (`C:\ProgramData\uts-automation`) to SYSTEM and Administrators** on startup, so
+> a standard user cannot read the schedule or secret files directly.
+>
+> One residual path remains by design: any local user can *export* a schedule
+> (choosing their own password) and re-import it to recover its secrets, because
+> schedules are shared and there is no per-user ownership yet. If that matters
+> for your VM, restrict who can reach the app, and treat closing it as a
+> follow-up (it needs per-user schedule ownership).
 
 ## Method 1: the NSIS installer (if it builds)
 

@@ -10,11 +10,12 @@ const cron = require("node-cron");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const { spawn } = require("child_process");
+const { spawn, execSync } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
 
 const paths = require("./scheduler-service-paths");
 const { portableEncrypt, portableDecrypt } = require("./utils/portableEncryption");
+const { makeScheduleSecrets } = require("./utils/scheduleSecrets");
 const { getChromeBinary } = require("./utils/chromeFinder");
 
 const PORT = parseInt(process.env.UTS_SCHEDULER_PORT || "5050", 10);
@@ -107,6 +108,20 @@ const secretsStore = {
   deleteSecret(name) { delete secrets[name]; saveSecrets(); },
 };
 
+// ─── Bundled-secret protection ───
+
+// Secrets bundled into a schedule are stored encrypted with the service's
+// machine key, never as plaintext, because schedules.json lives in a shared
+// directory. `hardenDataDir()` locks that directory down as well, but
+// encrypting the values is defence in depth if the ACL is ever loosened or a
+// copy of the file leaves the machine.
+const scheduleSecrets = makeScheduleSecrets({
+  encrypt: (obj) => encryptData(obj || {}),
+  decrypt: (str) => decryptData(str),
+  onError: (msg) => console.error(`[scheduleStore] ${msg}`),
+});
+const getScheduleSecrets = scheduleSecrets.getScheduleSecrets;
+
 // ─── Schedule store (JSON file in shared data dir) ───
 
 function loadSchedules() {
@@ -121,7 +136,11 @@ function loadSchedules() {
 }
 
 function saveSchedules(schedules) {
-  fs.writeFileSync(paths.SCHEDULES_FILE, JSON.stringify(schedules, null, 2));
+  // Never persist plaintext bundled secrets. Any schedule arriving with a
+  // plaintext `bundledSecrets` object is converted to `bundledSecretsEnc` here,
+  // which also migrates legacy records the first time they are saved.
+  const safe = scheduleSecrets.prepareForSave(schedules);
+  fs.writeFileSync(paths.SCHEDULES_FILE, JSON.stringify(safe, null, 2));
 }
 
 const scheduleStore = {
@@ -175,8 +194,9 @@ function buildCronExpression(schedule) {
 
 function compileAndRun(schedule, onLog, onDone) {
   // Use bundled secrets if available, fall back to service secrets store
-  const allSecrets = schedule.bundledSecrets && Object.keys(schedule.bundledSecrets).length > 0
-    ? { ...schedule.bundledSecrets }
+  const bundled = getScheduleSecrets(schedule);
+  const allSecrets = Object.keys(bundled).length > 0
+    ? bundled
     : (() => {
         const s = {};
         secretsStore.listNames().forEach((name) => { s[name] = secretsStore.getSecret(name); });
@@ -573,6 +593,49 @@ function isRunning(scheduleId) {
   return !!runningProcesses[scheduleId];
 }
 
+// Rewrite schedules.json once at startup so any legacy plaintext bundled
+// secrets are converted to the encrypted form. saveSchedules() does the
+// conversion; this just forces it to run without waiting for the next edit.
+function migrateSecretsAtRest() {
+  try {
+    const all = loadSchedules();
+    if (scheduleSecrets.hasPlaintext(all)) {
+      saveSchedules(all);
+      console.log("[scheduler] Migrated plaintext bundled secrets to encrypted at-rest storage");
+    }
+  } catch (e) {
+    console.error("[scheduler] Secret migration failed:", e.message);
+  }
+}
+
+// Lock the shared data directory to SYSTEM and Administrators, so a standard
+// user on the VM cannot read the schedule and secret files directly. The
+// service runs as LocalSystem, so it keeps access. Best-effort: a failure is
+// logged, and the at-rest encryption still protects the secret values.
+function hardenDataDir() {
+  if (process.platform !== "win32") return;
+
+  const marker = path.join(paths.DATA_DIR, ".acl-hardened");
+  if (fs.existsSync(marker)) return;
+
+  try {
+    // /inheritance:r drops inherited ACEs (including the Users read grant);
+    // /grant:r replaces the SYSTEM and Administrators grants with full control,
+    // inheritable by files and folders; /T recurses over existing children.
+    const cmd =
+      `icacls "${paths.DATA_DIR}" /inheritance:r ` +
+      `/grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" /T /C /Q`;
+    execSync(cmd, { windowsHide: true, stdio: "ignore" });
+    fs.writeFileSync(marker, new Date().toISOString());
+    console.log(`[scheduler] Restricted ${paths.DATA_DIR} to SYSTEM and Administrators`);
+  } catch (e) {
+    console.error(
+      `[scheduler] Could not restrict the data directory ACL (${e.message}). ` +
+        `Bundled secrets remain encrypted at rest, but the directory ACL was not tightened.`
+    );
+  }
+}
+
 function restoreSchedules() {
   const all = scheduleStore.getAll();
   for (const schedule of all) {
@@ -588,6 +651,7 @@ function safeSchedule(s) {
     ...s,
     sequencePayload: undefined,
     bundledSecrets: undefined,
+    bundledSecretsEnc: undefined,
     bundledTestCode: undefined,
     bundledImages: undefined,
     lastFailureScreenshots: undefined,
@@ -762,7 +826,9 @@ app.post("/api/schedules/:id/export", (req, res) => {
       executedBy: schedule.executedBy, accountId: schedule.accountId,
     },
     sequencePayload: schedule.sequencePayload,
-    bundledSecrets: schedule.bundledSecrets || {},
+    // Decrypt from at-rest storage into the portable bundle, which is then
+    // re-encrypted under the user's export password below.
+    bundledSecrets: getScheduleSecrets(schedule),
     bundledTestCode: schedule.bundledTestCode || {},
     bundledImages: schedule.bundledImages || {},
     failureScreenshots: schedule.lastFailureScreenshots || {},
@@ -862,6 +928,8 @@ app.post("/api/schedules/import", (req, res) => {
 
 // ─── Start server ───
 
+hardenDataDir();
+migrateSecretsAtRest();
 restoreSchedules();
 
 app.listen(PORT, () => {

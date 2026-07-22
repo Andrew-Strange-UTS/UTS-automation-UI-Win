@@ -1,6 +1,7 @@
 ---
 title: "Feature Walkthrough (UAT)"
-nav_order: 5
+nav_exclude: true
+search_exclude: true
 ---
 
 # Marvin: Feature Walkthrough (UAT)

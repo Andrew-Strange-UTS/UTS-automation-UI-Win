@@ -1,6 +1,6 @@
 ---
 title: Installing on a VM
-nav_order: 4
+nav_order: 5
 ---
 
 # Installing Marvin on a Windows VM
@@ -35,6 +35,9 @@ Understanding this up front avoids surprises on a shared VM.
   and can launch Marvin.** There is no per-user install option.
 - **Each user has their own tests, sequences, and secrets**, stored under their
   own `%APPDATA%\Marvin`. Users do not share these.
+- **Users can run Marvin at the same time.** Each session starts its own backend
+  on an automatically chosen free port, so two people logged into the VM at once
+  do not clash.
 - **Schedules are shared across all users.** The scheduler service stores them
   in `C:\ProgramData\uts-automation`, so every user sees and can edit the same
   scheduled sequences, and each schedule fires once no matter how many people
@@ -147,7 +150,9 @@ installer is 80 to 150 MB. Use Method 2 instead.
 
 **The app opens but says the backend did not start.** Open the log it names,
 `%APPDATA%\Marvin\logs\backend.log`. The most common cause is a build packaged
-without the server's dependencies; the log will say so. Rebuild and redeploy.
+without the server's dependencies; the log will say so. Rebuild and redeploy. (A
+second user getting this while the first had Marvin open was an older fixed bug,
+a fixed port collision; make sure you are on a current build.)
 
 **The Schedules screen says the service is not running.** The scheduler service
 is not installed or will not start. Install it (above) from an elevated prompt.

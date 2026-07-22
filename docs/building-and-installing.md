@@ -1,6 +1,6 @@
 ---
 title: Building and Installing
-nav_order: 3
+nav_order: 4
 ---
 
 # Building and installing the Windows installer
@@ -70,12 +70,16 @@ The installer is written to `dist/Marvin Setup <version>.exe` (for example
 `dist/Marvin Setup 1.0.0.exe`).
 
 To produce a `marvin-setup-<version>.exe` filename instead, add an `artifactName`
-to the `nsis` block in `package.json`:
+to the `nsis` block in `package.json`. The current block, with that line added,
+is:
 
 ```json
 "nsis": {
   "oneClick": false,
+  "perMachine": true,
   "allowToChangeInstallationDirectory": true,
+  "createDesktopShortcut": true,
+  "createStartMenuShortcut": true,
   "artifactName": "marvin-setup-${version}.${ext}"
 }
 ```
@@ -106,6 +110,10 @@ fires once regardless of how many users are logged in.
 
 Schedules carry a bundled copy of their test code, so a schedule still runs, and
 is still visible, for users whose own test repo does not contain that test.
+
+Multiple users can run Marvin **at the same time** on the same machine: each
+user's app starts its own backend on an automatically chosen free port, so there
+is no clash between sessions.
 
 ## Alternative: deploy without the NSIS installer
 

@@ -1,6 +1,7 @@
 ---
 title: "Acceptance: Web mode"
-nav_order: 6
+nav_exclude: true
+search_exclude: true
 ---
 
 # Marvin: Web Mode Acceptance Test Checklist

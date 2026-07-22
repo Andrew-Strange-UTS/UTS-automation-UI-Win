@@ -14,22 +14,14 @@ Scale reporting, secrets management, and encrypted schedule bundles.
 - [Creating Tests](creating-tests.html): how to write `run.js` tests, the full web
   and desktop driver API, secrets, parameters, Zephyr reporting, OCR and image
   matching, and a copy-pasteable AI prompt.
-- [Example Tests](example-tests.html): seven real, worked examples explained line by
-  line for beginners, plus how to get an AI to build tests for you.
+- [Example Tests](example-tests.html): a ready-made set of eight worked examples
+  from the `win-marvin-tests` repo, including the image-recognition resolution note.
 - [Building and Installing](building-and-installing.html): build the Windows
   installer (`.exe`) and the packaging details, for developers.
 - [Installing on a VM](installing-on-a-vm.html): deploy Marvin to one or more
   Windows VMs, including shared multi-user machines, the scheduler service, and
   troubleshooting on locked-down machines.
-- [Feature Walkthrough (UAT)](feature-uat.html): a plain-language checklist to
-  confirm every UI function works, from adding secrets to scheduling and Zephyr
-  reporting.
-- [Acceptance Checklist: Web mode](acceptance-web.html): tester sign-off checklist
-  for web features.
-- [Acceptance Checklist: Desktop mode](acceptance-desktop.html): tester sign-off
-  checklist for desktop features.
-- [Design: C# / .NET test support](design-dotnet-support.html): proposed design for
-  adding a second test language (EPEA-1916).
+- [C# / .NET support](design-dotnet-support.html): coming soon.
 
 ## Quick start
 
@@ -41,4 +33,4 @@ Scale reporting, secrets management, and encrypted schedule bundles.
 5. Add tests to the run sequence and click Run Sequence, or schedule them.
 
 See [Creating Tests](creating-tests.html) to author your own, or the
-[Example Tests](example-tests.html) page to learn from seven worked examples.
+[Example Tests](example-tests.html) page for a ready-made set to try.

@@ -21,6 +21,9 @@ Scale reporting, secrets management, and encrypted schedule bundles.
 - [Installing on a VM](installing-on-a-vm.html): deploy Marvin to one or more
   Windows VMs, including shared multi-user machines, the scheduler service, and
   troubleshooting on locked-down machines.
+- [Feature Walkthrough (UAT)](feature-uat.html): a plain-language checklist to
+  confirm every UI function works, from adding secrets to scheduling and Zephyr
+  reporting.
 - [Acceptance Checklist: Web mode](acceptance-web.html): tester sign-off checklist
   for web features.
 - [Acceptance Checklist: Desktop mode](acceptance-desktop.html): tester sign-off

@@ -16,3 +16,6 @@ server/daemon/
 TSImages/
 data/
 .claude/
+
+# Regenerable spreadsheet output (see scripts/uat_to_xlsx.py)
+docs/feature-uat.xlsx

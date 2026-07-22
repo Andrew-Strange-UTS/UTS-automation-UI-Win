@@ -25,6 +25,15 @@ If you are building the installer rather than deploying it, see
 Marvin will start without Node or Git, but it cannot run a test or clone a repo
 without them, so treat both as hard prerequisites.
 
+> **Install Node and Git for _all users_, not just your profile.** This is a
+> common trip-up on a shared VM. Git for Windows offers "all users" (system
+> `PATH`, in `Program Files`) or "just me" (your `%LOCALAPPDATA%`, your user
+> `PATH` only). A "just me" install works for the account that installed it but
+> is invisible to every other profile, and to the scheduler service (which runs
+> as LocalSystem and uses the system `PATH`), so those users get "git not found"
+> when pulling a test repo. Install both machine-wide, then have each user start
+> a fresh session so the system `PATH` is picked up.
+
 ## How multi-user works
 
 Understanding this up front avoids surprises on a shared VM.
@@ -166,6 +175,11 @@ build from this version. As an escape hatch you can force the old behaviour by
 setting the environment variable `UTS_POWERSHELL_SESSION=0`, but you should not
 need to.
 
-**Git or Node "not found" errors when running a test.** They are not on the
-`PATH` for the account running Marvin. Install them machine-wide and re-check
-`node --version` / `git --version` in a fresh session.
+**Git or Node "not found" errors when running a test, or repo pulls fail for
+some users but not others.** Node or Git was installed **"just me"** on one
+profile, so it is only on that user's `PATH`. Check the **Git** row on each
+user's startup diagnostics screen (green for the installer, red for others), or
+run `where.exe git` (a path under `%LOCALAPPDATA%` means a per-user install).
+Reinstall Git for Windows / Node **for all users** so they land on the system
+`PATH`, then log off and on so each session picks it up. The scheduler service
+(LocalSystem) also needs them on the system `PATH`.

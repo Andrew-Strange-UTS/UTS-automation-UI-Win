@@ -842,55 +842,59 @@ export default function App() {
           })()}
           stepNames={runSequence.map((t) => t.name)}
         />
-        {/* Test Type Toggle */}
-        <div style={{ display: "flex", justifyContent: "center", margin: "24px 0 16px" }}>
-          <div style={{
-            display: "inline-flex",
-            borderRadius: "8px",
-            overflow: "hidden",
-            border: `2px solid ${theme.primary}`,
-          }}>
-            <button
-              onClick={() => handleSwitchTestType("desktop")}
-              disabled={isLinuxPlatform}
-              title={isLinuxPlatform ? "Desktop tests require Windows + PowerShell and are not available on Linux." : ""}
-              style={{
-                padding: "10px 24px",
-                fontSize: "15px",
-                fontWeight: "bold",
-                border: "none",
-                cursor: isLinuxPlatform ? "not-allowed" : "pointer",
-                opacity: isLinuxPlatform ? 0.5 : 1,
-                backgroundColor: testType === "desktop" ? theme.primary : "#fff",
-                color: testType === "desktop" ? theme.primaryText : theme.primary,
-              }}
-            >
-              Desktop Tests
-            </button>
-            <button
-              onClick={() => handleSwitchTestType("web")}
-              style={{
-                padding: "10px 24px",
-                fontSize: "15px",
-                fontWeight: "bold",
-                border: "none",
-                borderLeft: `2px solid ${theme.primary}`,
-                cursor: "pointer",
-                backgroundColor: testType === "web" ? theme.primary : "#fff",
-                color: testType === "web" ? theme.primaryText : theme.primary,
-              }}
-            >
-              Web Tests
-            </button>
-          </div>
-          {isLinuxPlatform && (
-            <div style={{ marginTop: "8px", fontSize: "12px", color: "#888" }}>
-              Desktop tests require Windows + PowerShell and are disabled on Linux.
+        {/* Test Type Toggle + Zephyr identity fields, on separate rows */}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px", margin: "24px 0 16px" }}>
+          {/* Row 1: Desktop / Web switch */}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+            <div style={{
+              display: "inline-flex",
+              borderRadius: "8px",
+              overflow: "hidden",
+              border: `2px solid ${theme.primary}`,
+            }}>
+              <button
+                onClick={() => handleSwitchTestType("desktop")}
+                disabled={isLinuxPlatform}
+                title={isLinuxPlatform ? "Desktop tests require Windows + PowerShell and are not available on Linux." : ""}
+                style={{
+                  padding: "10px 24px",
+                  fontSize: "15px",
+                  fontWeight: "bold",
+                  border: "none",
+                  cursor: isLinuxPlatform ? "not-allowed" : "pointer",
+                  opacity: isLinuxPlatform ? 0.5 : 1,
+                  backgroundColor: testType === "desktop" ? theme.primary : "#fff",
+                  color: testType === "desktop" ? theme.primaryText : theme.primary,
+                }}
+              >
+                Desktop Tests
+              </button>
+              <button
+                onClick={() => handleSwitchTestType("web")}
+                style={{
+                  padding: "10px 24px",
+                  fontSize: "15px",
+                  fontWeight: "bold",
+                  border: "none",
+                  borderLeft: `2px solid ${theme.primary}`,
+                  cursor: "pointer",
+                  backgroundColor: testType === "web" ? theme.primary : "#fff",
+                  color: testType === "web" ? theme.primaryText : theme.primary,
+                }}
+              >
+                Web Tests
+              </button>
             </div>
-          )}
-          <div style={{ marginTop: "12px" }}>
+            {isLinuxPlatform && (
+              <div style={{ marginTop: "8px", fontSize: "12px", color: "#888" }}>
+                Desktop tests require Windows + PowerShell and are disabled on Linux.
+              </div>
+            )}
+          </div>
+          {/* Row 2: Zephyr identity fields, wrapping on narrow widths */}
+          <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "24px" }}>
             <label style={{ fontSize: "13px", color: theme.primary, fontWeight: "bold" }}>
-              Tester name (optional):{" "}
+              Tester name (for Zephyr reporting):{" "}
               <input
                 type="text"
                 value={testerName}
@@ -900,10 +904,8 @@ export default function App() {
                 style={{ padding: "6px 10px", fontSize: "13px", borderRadius: "4px", border: "1px solid #ccc", width: "200px", fontWeight: "normal" }}
               />
             </label>
-          </div>
-          <div style={{ marginTop: "8px" }}>
             <label style={{ fontSize: "13px", color: theme.primary, fontWeight: "bold" }}>
-              Atlassian account ID (optional):{" "}
+              Atlassian account ID (for Zephyr reporting):{" "}
               <input
                 type="text"
                 value={atlassianAccountId}

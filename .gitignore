@@ -12,5 +12,7 @@ schedules/
 tmp/
 # node-windows writes its service wrapper here when the scheduler is installed
 server/daemon/
+# Scratch screenshots dropped in for reference, not part of the app
+TSImages/
 data/
 .claude/

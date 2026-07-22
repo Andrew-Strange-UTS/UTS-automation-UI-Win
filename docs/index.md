@@ -16,6 +16,11 @@ Scale reporting, secrets management, and encrypted schedule bundles.
   matching, and a copy-pasteable AI prompt.
 - [Example Tests](example-tests.html): a ready-made set of eight worked examples
   from the `win-marvin-tests` repo, including the image-recognition resolution note.
+- [How to: Secrets](how-to-secrets.html): add, use, and store secrets safely.
+- [How to: Zephyr reporting](how-to-zephyr.html): connect Marvin to Zephyr Scale
+  and post results to a test cycle.
+- [How to: Schedules](how-to-schedules.html): run test sequences on a timetable
+  with the scheduler service.
 - [Building and Installing](building-and-installing.html): build the Windows
   installer (`.exe`) and the packaging details, for developers.
 - [Installing on a VM](installing-on-a-vm.html): deploy Marvin to one or more

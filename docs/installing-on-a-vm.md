@@ -1,6 +1,6 @@
 ---
 title: Installing on a VM
-nav_order: 5
+nav_order: 8
 ---
 
 # Installing Marvin on a Windows VM

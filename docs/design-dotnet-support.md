@@ -1,6 +1,6 @@
 ---
 title: "C# / .NET support (coming soon)"
-nav_order: 6
+nav_order: 9
 ---
 
 # C# / .NET support

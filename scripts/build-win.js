@@ -45,7 +45,13 @@ if (!fs.existsSync(bin)) {
 console.log("Building the Marvin Windows installer...");
 console.log("(this can take a few minutes; progress is shown below)\n");
 
-const child = spawn(bin, ["--win"], { stdio: ["inherit", "pipe", "pipe"] });
+// shell:true is required on Windows: recent Node refuses to spawn a .cmd
+// directly (EINVAL, the CVE-2024-27980 hardening). Pass the command as a
+// quoted string so a path with spaces is still handled.
+const child = spawn(`"${bin}" --win`, {
+  stdio: ["inherit", "pipe", "pipe"],
+  shell: true,
+});
 
 let lastOutput = Date.now();
 

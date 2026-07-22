@@ -648,7 +648,7 @@ export default function App() {
         <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "20px", marginBottom: "8px" }}>
           <h1 style={{ margin: 0, fontSize: "42px" }}>Marvin</h1>
           <img
-            src="/img/marvin.png"
+            src="./img/marvin.png"
             alt="Marvin"
             style={{ height: "100px", width: "auto", objectFit: "contain" }}
             onError={(e) => { e.target.style.display = "none"; }}

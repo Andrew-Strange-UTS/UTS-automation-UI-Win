@@ -77,7 +77,7 @@ export default function PATPopup({ open, onClose }) {
           </a>
                     {/* IMAGE AT THE BOTTOM */}
           <img
-            src="/img/steps.png"
+            src="./img/steps.png"
             alt="GitHub SSO token steps"
             style={{
               display: "block",

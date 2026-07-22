@@ -137,7 +137,7 @@ export default function StartupChecks({ onDismiss }) {
       <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "12px", marginBottom: "6px" }}>
         <h2 style={{ margin: 0 }}>Marvin</h2>
         <img
-          src="/img/marvin.png"
+          src="./img/marvin.png"
           alt="Marvin"
           style={{ height: "40px", width: "auto", objectFit: "contain" }}
           onError={(e) => { e.target.style.display = "none"; }}

@@ -60,7 +60,9 @@ npm run dist
 
 1. `predist`: builds the renderer (Vite, into `renderer/dist`) and installs the
    server production dependencies.
-2. `electron-builder --win`: packages an NSIS installer into `dist/`.
+2. `node scripts/build-win.js`: runs `electron-builder --win` with visible
+   progress (stage banners and an elapsed-time heartbeat during the quiet
+   packaging/NSIS phases), packaging an NSIS installer into `dist/`.
 
 ### Output
 

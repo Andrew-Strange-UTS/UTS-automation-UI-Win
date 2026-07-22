@@ -10,7 +10,7 @@
     "build:renderer": "cd renderer && npm run build",
     "build:server": "cd server && npm install --production",
     "predist": "npm run build:renderer && npm run build:server",
-    "dist": "electron-builder --win",
+    "dist": "node scripts/build-win.js",
     "postinstall": "electron-builder install-app-deps"
   },
   "devDependencies": {

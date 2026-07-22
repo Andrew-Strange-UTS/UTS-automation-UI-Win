@@ -17,7 +17,10 @@ Scale reporting, secrets management, and encrypted schedule bundles.
 - [Example Tests](example-tests.html): seven real, worked examples explained line by
   line for beginners, plus how to get an AI to build tests for you.
 - [Building and Installing](building-and-installing.html): build the Windows
-  installer (`.exe`), install it, and set up the scheduler service.
+  installer (`.exe`) and the packaging details, for developers.
+- [Installing on a VM](installing-on-a-vm.html): deploy Marvin to one or more
+  Windows VMs, including shared multi-user machines, the scheduler service, and
+  troubleshooting on locked-down machines.
 - [Acceptance Checklist: Web mode](acceptance-web.html): tester sign-off checklist
   for web features.
 - [Acceptance Checklist: Desktop mode](acceptance-desktop.html): tester sign-off

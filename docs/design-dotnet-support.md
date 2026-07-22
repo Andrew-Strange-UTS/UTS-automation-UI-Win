@@ -1,6 +1,6 @@
 ---
 title: "Design: C# / .NET support"
-nav_order: 6
+nav_order: 7
 ---
 
 # Design: C# / .NET test support (EPEA-1916)

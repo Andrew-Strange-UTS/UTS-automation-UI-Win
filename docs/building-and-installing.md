@@ -5,6 +5,10 @@ nav_order: 3
 
 # Building and installing the Windows installer
 
+This page is the developer reference for **building** the app. If you just need
+to **deploy** Marvin to one or more Windows VMs, see
+[Installing on a VM](installing-on-a-vm.html), which is written for that task.
+
 Marvin ships as a single NSIS `.exe` installer that bundles Electron, the Node
 server and its dependencies, and the built renderer.
 
@@ -12,14 +16,29 @@ server and its dependencies, and the built renderer.
 `PATH`. Test runs are executed by spawning `node run.js` (`server/routes/sequence.js`,
 `server/scheduler.js`), and the scheduler service is registered as a Node
 process, so a machine without Node can start Marvin but cannot run a test.
-
-On Git specifically: cloning a test repo goes through `simpleGit()` in
+Cloning a test repo goes through `simpleGit()` in
 `server/controllers/gitController.js`, which resolves `git` from the system
-`PATH`. The `resources/portable-git` entry in the `extraResources` build config
-is not wired up: the folder is gitignored and never populated, and no code points
-simple-git at it, so `npm run dist` logs a harmless "file source doesn't exist"
-warning for it. Bundling a portable Git would need that folder populated *and*
-`simpleGit` configured with its binary path.
+`PATH`. There is no bundled Git; it is a prerequisite on every target machine.
+
+### Packaging details worth knowing
+
+- **`asar: false`.** The app is packaged as loose files under `resources/app`,
+  not an `app.asar` archive. The backend spawns plain `node` processes to run
+  tests, and a plain Node process cannot read inside an asar archive, so the
+  archive is disabled deliberately.
+- **The server's `node_modules` is copied via `extraResources`.** electron-builder
+  resolves `node_modules` from the *root* `package.json`'s production dependency
+  tree, which here holds only `devDependencies`. The real dependencies live in
+  `server/package.json`, so they are copied verbatim to
+  `resources/app/server/node_modules` instead. After a build, confirm they are
+  present:
+
+  ```powershell
+  Test-Path ".\dist\win-unpacked\resources\app\server\node_modules\express"
+  ```
+
+  If that is `False`, the backend will not start. Rebuild with
+  `cd server; npm install --production; cd ..; npm run dist`.
 
 ## Build the installer
 

@@ -1,6 +1,6 @@
 ---
 title: "Acceptance: Desktop mode"
-nav_order: 5
+nav_order: 6
 ---
 
 # Marvin: Desktop Mode Acceptance Test Checklist

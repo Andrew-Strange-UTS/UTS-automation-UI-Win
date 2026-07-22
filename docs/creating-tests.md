@@ -263,6 +263,20 @@ runs in. When that session is a Remote Desktop / VM connection, keep these in mi
 
 ---
 
+## Stopping a run
+
+While a sequence is running, a red **■ Stop** button appears in the Run Sequence
+panel. Clicking it halts the run and the log ends with `=== Stopped by user ===`,
+which is distinct from a pass or a failure, and a stopped run does not report a
+result to Zephyr.
+
+Stop terminates Marvin's test runner. **Applications the test opened (Paint, a
+browser) are left running**, matching how tests already leave them open for
+inspection, so Stop does not clear your screen. One action already in flight may
+finish before the run halts; stopping between actions is immediate.
+
+---
+
 ## Image OCR and Recognition (Desktop Tests)
 
 Desktop tests can use image-based automation to read text from the screen (OCR) and find reference images on screen (template matching). This is useful for automating apps where you can't easily target elements by window title or coordinates.

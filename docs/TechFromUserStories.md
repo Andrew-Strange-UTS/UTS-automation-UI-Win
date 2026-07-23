@@ -159,7 +159,9 @@ Confirmed first that `repoUrl`, `testType`, `testerName`, and `atlassianAccountI
 
 ### EPEA-2510 — Clone test repos (public and private)
 `gitController.cloneTestRepo` uses `simple-git` to clone into `CLONE_TARGET`; private repos inject `https://USER:PAT@host` from `GITHUB_USERNAME`/`GITHUB_PERSONAL_ACCESS_TOKEN` (env or secrets store), returning 403 if missing, with EBUSY-retry removal on locked folders. `listTests` scans the cloned `tests/` dir for subfolders; the UI toggles private mode via `PrivateRepoCheckbox.jsx` and guides token setup via `PATPopup.jsx`.
-- `server/controllers/gitController.js`, `server/routes/git.js`, `renderer/src/components/PrivateRepoCheckbox.jsx`, `renderer/src/components/PATPopup.jsx`, `renderer/src/App.jsx`
+
+Private-repo help improved: ticking the **Private repository** box now opens the help popup, and the checkbox has a `?` button to reopen it. `PATPopup.jsx` was restructured into three numbered steps (create a GitHub token with `repo` scope; add `GITHUB_USERNAME` + `GITHUB_PERSONAL_ACCESS_TOKEN` secrets; load the repo) with two screenshot slots (`renderer/public/img/pat-github.png`, `renderer/public/img/pat-marvin.png`) that hide gracefully via an `onError` handler until the image files are added. The previously referenced `steps.png` was never committed to this repo, so that image was broken.
+- `server/controllers/gitController.js`, `server/routes/git.js`, `renderer/src/components/PrivateRepoCheckbox.jsx`, `renderer/src/components/PATPopup.jsx`, `renderer/src/App.jsx`, `renderer/public/img/`
 
 ### EPEA-2511 — Windows Installer & Distribution
 `package.json` `build` config: `appId com.uts.marvin`, `productName Marvin`, NSIS Windows target (non-oneClick, user-selectable dir, custom icon), packs `main/`, `renderer/dist/`, `server/` into an asar (chromedriver unpacked). `predist`/`dist` scripts build the renderer, install production server deps, then run `electron-builder --win`.

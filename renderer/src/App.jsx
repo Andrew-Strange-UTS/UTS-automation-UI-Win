@@ -730,7 +730,11 @@ export default function App() {
             </datalist>
           )}
           <PATPopup open={patPopupOpen} onClose={() => setPatPopupOpen(false)} />
-          <PrivateRepoCheckbox checked={privateRepo} onChange={setPrivateRepo} />
+          <PrivateRepoCheckbox
+            checked={privateRepo}
+            onChange={(v) => { setPrivateRepo(v); if (v) setPatPopupOpen(true); }}
+            onHelp={() => setPatPopupOpen(true)}
+          />
           <button
             onClick={handleClone}
             style={{

@@ -153,6 +153,10 @@ SchedulePanel adds an ntfy topic field plus optional custom server URL (placehol
 
 ## Repo & Distribution
 
+### EPEA-TBD-8 — Remember GitHub repo history for quicker reloading
+Confirmed first that `repoUrl`, `testType`, `testerName`, and `atlassianAccountId` in `App.jsx` all already persist to `localStorage` with the same read-on-init / write-on-change pattern, so desktop/web mode and the Zephyr identity fields already survive a restart; no change was needed there. Added a repo history on top: a `repoHistory` array (localStorage key `repoHistory`, JSON, most-recent-first, deduped, capped at 10) with `addToRepoHistory` (called on a successful clone in `handleClone`) and `clearRepoHistory`. The repo input gained a `<datalist>` for type-ahead suggestions, and a "Recent:" row of clickable chips (showing the `owner/repo` short form) below the input, each setting `repoUrl`, plus a Clear link. All localStorage access is wrapped so a failure degrades gracefully.
+- `renderer/src/App.jsx`
+
 ### EPEA-2510 — Clone test repos (public and private)
 `gitController.cloneTestRepo` uses `simple-git` to clone into `CLONE_TARGET`; private repos inject `https://USER:PAT@host` from `GITHUB_USERNAME`/`GITHUB_PERSONAL_ACCESS_TOKEN` (env or secrets store), returning 403 if missing, with EBUSY-retry removal on locked folders. `listTests` scans the cloned `tests/` dir for subfolders; the UI toggles private mode via `PrivateRepoCheckbox.jsx` and guides token setup via `PATPopup.jsx`.
 - `server/controllers/gitController.js`, `server/routes/git.js`, `renderer/src/components/PrivateRepoCheckbox.jsx`, `renderer/src/components/PATPopup.jsx`, `renderer/src/App.jsx`

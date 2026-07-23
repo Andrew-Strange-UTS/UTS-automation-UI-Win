@@ -38,6 +38,37 @@ export default function App() {
       localStorage.setItem("repoUrl", repoUrl);
     }
   }, [repoUrl]);
+
+  // History of GitHub repo URLs that loaded successfully, most recent first.
+  // Persisted per user and offered as suggestions on the repo input.
+  const REPO_HISTORY_MAX = 10;
+  const [repoHistory, setRepoHistory] = useState(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = localStorage.getItem("repoHistory");
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.filter((u) => typeof u === "string") : [];
+    } catch {
+      return [];
+    }
+  });
+  const addToRepoHistory = (url) => {
+    const clean = (url || "").trim();
+    if (!clean) return;
+    setRepoHistory((prev) => {
+      const next = [clean, ...prev.filter((u) => u !== clean)].slice(0, REPO_HISTORY_MAX);
+      if (typeof window !== "undefined") {
+        try { localStorage.setItem("repoHistory", JSON.stringify(next)); } catch {}
+      }
+      return next;
+    });
+  };
+  const clearRepoHistory = () => {
+    setRepoHistory([]);
+    if (typeof window !== "undefined") {
+      try { localStorage.removeItem("repoHistory"); } catch {}
+    }
+  };
   const [tests, setTests] = useState([]);
   const [files, setFiles] = useState({});
   const [loading, setLoading] = useState(false);
@@ -277,6 +308,8 @@ export default function App() {
         try { const e = await res.json(); if (e && e.error) msg = e.error; } catch {}
         throw new Error(msg);
       }
+      // The clone succeeded, so remember this repo for next time.
+      addToRepoHistory(repoUrl);
       const listRes = await fetch(`${BACKEND_URL}/api/git/list`);
       const data = await listRes.json();
       setTests(data);
@@ -679,6 +712,8 @@ export default function App() {
             placeholder="Enter GitHub Repo URL..."
             value={repoUrl}
             onChange={(e) => setRepoUrl(e.target.value)}
+            list="repo-history"
+            title="Previously used repos are suggested as you type"
             style={{
               width: "500px",
               padding: "12px",
@@ -687,6 +722,13 @@ export default function App() {
               border: "1px solid #ccc",
             }}
           />
+          {repoHistory.length > 0 && (
+            <datalist id="repo-history">
+              {repoHistory.map((url) => (
+                <option key={url} value={url} />
+              ))}
+            </datalist>
+          )}
           <PATPopup open={patPopupOpen} onClose={() => setPatPopupOpen(false)} />
           <PrivateRepoCheckbox checked={privateRepo} onChange={setPrivateRepo} />
           <button
@@ -718,6 +760,41 @@ export default function App() {
             {secretsOpen ? "Close Secrets" : "Open Secrets"}
           </button>
         </div>
+        {/* Recent repos: click to reload a previously used repo */}
+        {repoHistory.length > 0 && (
+          <div style={{
+            display: "flex", justifyContent: "center", alignItems: "center",
+            flexWrap: "wrap", gap: "8px", margin: "-18px auto 24px", maxWidth: "900px",
+          }}>
+            <span style={{ fontSize: "12px", color: "#888", fontWeight: "bold" }}>Recent:</span>
+            {repoHistory.slice(0, 6).map((url) => (
+              <button
+                key={url}
+                onClick={() => setRepoUrl(url)}
+                title={url}
+                style={{
+                  padding: "4px 10px", fontSize: "12px", maxWidth: "260px",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  background: repoUrl === url ? theme.primary : "#fff",
+                  color: repoUrl === url ? theme.primaryText : theme.primary,
+                  border: `1px solid ${theme.primary}`, borderRadius: "12px", cursor: "pointer",
+                }}
+              >
+                {url.replace(/^https?:\/\/(www\.)?github\.com\//, "").replace(/\.git$/, "")}
+              </button>
+            ))}
+            <button
+              onClick={clearRepoHistory}
+              title="Clear the recent repo history"
+              style={{
+                padding: "4px 8px", fontSize: "12px", background: "transparent",
+                color: "#999", border: "none", cursor: "pointer", textDecoration: "underline",
+              }}
+            >
+              Clear
+            </button>
+          </div>
+        )}
         {secretsOpen && (
           <div style={{ margin: '32px auto', width: '700px', maxWidth: '95%' }}>
             <SecretsPanel />

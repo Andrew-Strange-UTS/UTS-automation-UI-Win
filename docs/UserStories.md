@@ -492,6 +492,20 @@
 
 ## Repo & Distribution
 
+### EPEA-TBD-8 — Remember GitHub repo history for quicker reloading `2 pts`
+
+**Description:** The repo URL, desktop/web mode, and Zephyr identity fields already persist per user across restarts (localStorage). Add a **history of recently used GitHub repos** so switching between repos is quick: successful clones are remembered and offered as suggestions and clickable chips.
+
+**Acceptance Criteria:**
+- [x] AC1: A repo URL that clones successfully is added to a per-user history (most recent first, deduped, capped).
+- [x] AC2: The repo input suggests history entries as you type (datalist).
+- [x] AC3: Recent repos show as clickable chips below the input; clicking one loads it into the field.
+- [x] AC4: A Clear control empties the history.
+- [x] AC5: History persists across restarts and survives an app rebuild.
+- [x] AC6: Confirmed that mode, tester name, and Atlassian account ID already persist across restarts (no change needed, same localStorage mechanism as the repo URL).
+
+---
+
 ### EPEA-2510 — Clone test repos (public and private) `5 pts`
 
 **Description:** Port Git integration from v2. Users paste a GitHub URL and optionally tick Private repository. Marvin clones the repo using GITHUB_USERNAME + GITHUB_PERSONAL_ACCESS_TOKEN from the secrets store. A PAT setup popup guides users through token creation if secrets are missing. The tests/ directory is scanned and test cards are rendered for each found test.

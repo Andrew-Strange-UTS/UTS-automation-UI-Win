@@ -175,6 +175,21 @@ build from this version. As an escape hatch you can force the old behaviour by
 setting the environment variable `UTS_POWERSHELL_SESSION=0`, but you should not
 need to.
 
+**"Windows cannot access the specified device, path, or file" when launching
+Marvin.** Windows is being blocked from running `Marvin.exe`, almost always by
+antivirus / EDR or an application-control policy, not by a Marvin fault. It is
+common on locked-down machines because the executable is **unsigned**: it may
+launch fine for a while, then a Defender definition update or a policy push
+(SCCM/GPO) starts blocking or quarantining it. Diagnose on the machine (elevated):
+`Get-Item "C:\Program Files\Marvin\Marvin.exe"` (missing/0 bytes = quarantined);
+`Get-MpThreatDetection`; the Defender operational log (events 1116/1117); and the
+AppLocker "EXE and DLL" log (event 8004). Short term, IT restores it from
+quarantine and adds an exclusion for `C:\Program Files\Marvin\` (tamper
+protection means a standard user cannot do this). The durable fix is to
+**code-sign the executable** (see Building and Installing, code signing); a signed
+binary from a known publisher is not treated as unknown/low-prevalence and stops
+being blocked.
+
 **Git or Node "not found" errors when running a test, or repo pulls fail for
 some users but not others.** Node or Git was installed **"just me"** on one
 profile, so it is only on that user's `PATH`. Check the **Git** row on each

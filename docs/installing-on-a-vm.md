@@ -176,19 +176,40 @@ setting the environment variable `UTS_POWERSHELL_SESSION=0`, but you should not
 need to.
 
 **"Windows cannot access the specified device, path, or file" when launching
-Marvin.** Windows is being blocked from running `Marvin.exe`, almost always by
-antivirus / EDR or an application-control policy, not by a Marvin fault. It is
-common on locked-down machines because the executable is **unsigned**: it may
-launch fine for a while, then a Defender definition update or a policy push
-(SCCM/GPO) starts blocking or quarantining it. Diagnose on the machine (elevated):
-`Get-Item "C:\Program Files\Marvin\Marvin.exe"` (missing/0 bytes = quarantined);
-`Get-MpThreatDetection`; the Defender operational log (events 1116/1117); and the
-AppLocker "EXE and DLL" log (event 8004). Short term, IT restores it from
-quarantine and adds an exclusion for `C:\Program Files\Marvin\` (tamper
-protection means a standard user cannot do this). The durable fix is to
-**code-sign the executable** (see Building and Installing, code signing); a signed
-binary from a known publisher is not treated as unknown/low-prevalence and stops
-being blocked.
+Marvin.** Windows is being blocked from running `Marvin.exe`. On a managed
+machine this is usually **Microsoft Defender Attack Surface Reduction (ASR)**,
+specifically the rule **"Block executable files from running unless they meet a
+prevalence, age, or trusted list criterion"** (rule ID
+`01443614-CD74-433A-B99E-2ECDC07BFC25`). It blocks Marvin because the executable
+is **unsigned and low-prevalence** (Microsoft's cloud has not seen it on enough
+machines to trust it). Classic symptom: it launches fine for a day or two, then
+starts being blocked every time as the cloud reputation settles.
+
+Confirm it on the machine (elevated):
+
+```powershell
+Get-WinEvent -LogName "Microsoft-Windows-Windows Defender/Operational" -MaxEvents 30 |
+  Where-Object { $_.Id -eq 1121 } | Select-Object TimeCreated, Message | Format-List
+```
+
+Event **1121** naming `Marvin.exe` and that rule ID is the confirmation (the file
+and its `Users:(RX)` permissions are fine; it is purely the ASR rule).
+
+This rule is centrally managed, so no local user or admin can override it, **IT
+must act**:
+
+- **Immediate:** add an ASR exclusion for the whole install folder (not just the
+  exe, so bundled binaries like `chromedriver.exe` are covered too):
+
+  ```powershell
+  Add-MpPreference -AttackSurfaceReductionOnlyExclusions "C:\Program Files\Marvin"
+  ```
+
+  (applied via Intune / GPO, or locally if tamper protection allows).
+- **Durable:** **code-sign the app** (see Building and Installing, code signing).
+  A signed binary from a trusted publisher satisfies the rule's "trusted list"
+  criterion, so it is no longer treated as unknown, and usually removes the need
+  for a per-path exclusion.
 
 **Git or Node "not found" errors when running a test, or repo pulls fail for
 some users but not others.** Node or Git was installed **"just me"** on one

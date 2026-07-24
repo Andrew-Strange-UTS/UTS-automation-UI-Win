@@ -163,11 +163,60 @@ On Linux the equivalent is a systemd unit:
 sudo bash scripts/install-service-linux.sh
 ```
 
+## Code signing
+
+The default build is **unsigned** (`npm run dist` logs "no signing info
+identified, signing is skipped"). On a locked-down machine an unsigned,
+low-prevalence executable is blocked by Defender ASR (see the ASR troubleshooting
+in [Installing on a VM](installing-on-a-vm.html)), and elsewhere it triggers
+SmartScreen warnings. Signing with a certificate trusted by the target machines
+fixes both. Marvin has never been signed; this is a first-time setup.
+
+You need a code-signing certificate. The type decides the setup:
+
+- **Internal CA cert or a commercial OV cert as a `.pfx` file.** On the Windows
+  build machine, set the standard electron-builder env vars before building, and
+  it signs `Marvin.exe` and the installer automatically:
+
+  ```powershell
+  $env:CSC_LINK = "C:\path\to\marvin-codesign.pfx"
+  $env:CSC_KEY_PASSWORD = "the-pfx-password"
+  npm run dist
+  ```
+
+  No change to `package.json` is needed, and nothing secret is committed.
+
+- **A cert installed in the build machine's Windows certificate store** (common
+  for an internal CA). Add its subject name to the `win` block instead:
+
+  ```json
+  "win": {
+    "target": "nsis",
+    "icon": "resources/icons/icon.ico",
+    "certificateSubjectName": "<exact subject the CA issued>"
+  }
+  ```
+
+  Do not add this until you actually have the cert: a signing config with no cert
+  present makes every build fail.
+
+- **EV cert on a hardware token / HSM, or Azure Trusted Signing.** These cannot
+  be driven by a plain env var. An EV token must be present at build time; Azure
+  Trusted Signing needs its own config (and is smoother on electron-builder 26+,
+  newer than the pinned 25.x). Set these up per the signer's instructions.
+
+Verify a build is signed:
+
+```powershell
+Get-AuthenticodeSignature "dist\win-unpacked\Marvin.exe" | Format-List Status, SignerCertificate
+# Status should be "Valid"
+```
+
+A valid signature from a publisher the machines trust (a domain-trusted internal
+CA is ideal) satisfies the Defender ASR "trusted list" criterion, so Marvin stops
+being blocked, and usually removes the need for a per-path ASR exclusion.
+
 ## Notes
 
 - Building on Linux: electron-builder can target Windows via wine/mono, but it is
   fragile and the result is unsigned. Build on Windows for any real release.
-- Code signing: the default build produces an unsigned installer, so Windows
-  SmartScreen will warn users on first run. For wide distribution, sign the
-  installer with a code-signing certificate (configure `win.certificateFile` and
-  `win.certificatePassword`, or an EV/HSM signer) in `package.json`.

@@ -433,6 +433,21 @@
 
 ---
 
+### EPEA-TBD-10 — Data directory hardening locked the service out of its own key `5 pts`
+
+**Description:** The ACL hardening added by EPEA-TBD-6 emptied the permission list on every file already in `C:\ProgramData\uts-automation`, including `secrets_master_key`. The recursive `icacls` call granted SYSTEM and Administrators full control with the `(OI)(CI)` inheritance flags, which are invalid on a file: icacls rejected the grant for each existing child while still stripping its inherited permissions, leaving files with an empty DACL that not even SYSTEM could open. The scheduler service then died at startup with `EPERM: operation not permitted, open '...\secrets_master_key'`, so no schedules ran.
+
+**Acceptance Criteria:**
+- [x] AC1: Hardening grants inheritable permissions on the directory only; existing children are reset so they inherit, never granted directly.
+- [x] AC2: A machine already broken by the earlier version repairs itself on the next service start (versioned marker, so hardening re-runs).
+- [x] AC3: If the master key is still unreadable, the service takes ownership and resets that file specifically, then retries.
+- [x] AC4: If the repair fails, the service logs the exact elevated commands to run and stops, rather than dying on a raw stack trace.
+- [x] AC5: The master key is never regenerated over an existing one, so encrypted secrets can never be silently orphaned.
+- [x] AC6: A standard user still cannot read the shared schedule and secret files.
+- [ ] AC7: Verified on the VM: the service starts on its own after installing the new build. *(Awaiting confirmation.)*
+
+---
+
 ## Reporting & Notifications
 
 ### EPEA-2507 — Zephyr Scale result reporting per test `5 pts`

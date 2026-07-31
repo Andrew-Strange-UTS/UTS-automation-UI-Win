@@ -163,6 +163,34 @@ On Linux the equivalent is a systemd unit:
 sudo bash scripts/install-service-linux.sh
 ```
 
+### If the service will not start: EPERM on `secrets_master_key`
+
+Running it by hand shows the failure:
+
+```
+PS> node .\scheduler-service.js
+Error: EPERM: operation not permitted, open 'C:\ProgramData\uts-automation\secrets_master_key'
+```
+
+A version of the service before this fix hardened the data directory with a
+recursive `icacls` call, which emptied the permission list on every file already
+in it, locking out even SYSTEM. `Get-Acl` on the file shows an empty `Access :`
+and an SDDL ending in `D:PAI` with no entries.
+
+The current service repairs this on startup, so installing the latest build and
+restarting the service is the fix. To repair it by hand instead, from an
+**elevated** PowerShell:
+
+```powershell
+takeown /F C:\ProgramData\uts-automation\secrets_master_key /A
+icacls C:\ProgramData\uts-automation\secrets_master_key /reset
+Restart-Service -DisplayName "Marvin Scheduler"
+```
+
+Never delete `secrets_master_key`. Every stored secret and every secret bundled
+into a schedule is encrypted with it, and none of them can be recovered without
+it.
+
 ## Code signing
 
 The default build is **unsigned** (`npm run dist` logs "no signing info

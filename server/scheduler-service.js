@@ -16,6 +16,7 @@ const { v4: uuidv4 } = require("uuid");
 const paths = require("./scheduler-service-paths");
 const { portableEncrypt, portableDecrypt } = require("./utils/portableEncryption");
 const { makeScheduleSecrets } = require("./utils/scheduleSecrets");
+const { applyDataDirAcl, repairFileAcl } = require("./utils/dataDirAcl");
 const { getChromeBinary, getHeadlessUserAgent } = require("./utils/chromeFinder");
 
 const PORT = parseInt(process.env.UTS_SCHEDULER_PORT || "5050", 10);
@@ -54,16 +55,94 @@ copyIfMissing(
   ["zephyr.js", "image-utils.js"]
 );
 
+// ─── Data directory ACL (Windows) ───
+
+// Versioned, so an install hardened by the earlier (broken) version re-runs and
+// repairs itself rather than being skipped forever.
+const ACL_MARKER = ".acl-hardened-v2";
+
+// Lock the shared data directory to SYSTEM and Administrators, so a standard
+// user on the VM cannot read the schedule and secret files directly. The
+// service runs as LocalSystem, so it keeps access. Best-effort: a failure is
+// logged, and the at-rest encryption still protects the secret values.
+function hardenDataDir() {
+  if (process.platform !== "win32") return;
+
+  const marker = path.join(paths.DATA_DIR, ACL_MARKER);
+  if (fs.existsSync(marker)) return;
+
+  try {
+    applyDataDirAcl(paths.DATA_DIR);
+    fs.writeFileSync(marker, new Date().toISOString());
+    console.log(`[scheduler] Restricted ${paths.DATA_DIR} to SYSTEM and Administrators`);
+  } catch (e) {
+    console.error(
+      `[scheduler] Could not restrict the data directory ACL (${e.message}). ` +
+        `Bundled secrets remain encrypted at rest, but the directory ACL was not tightened.`
+    );
+  }
+}
+
+// Runs before the master key is read or created, so the key is never left
+// sitting in a loosely-permissioned directory, and so a directory broken by the
+// earlier version is repaired before anything tries to open a file in it.
+hardenDataDir();
+
 // ─── Secrets store (own encryption key in shared data dir) ───
 
 const ALGO = "aes-256-gcm";
 
+// The master key is not recoverable: losing it means every stored secret and
+// every bundled schedule secret becomes undecryptable. So a permission problem
+// is reported and the service stops, never worked around by generating a new
+// key over the top of the old one.
+function readKeyFile() {
+  try {
+    return fs.readFileSync(paths.SECRETS_KEY_FILE);
+  } catch (err) {
+    if ((err.code !== "EPERM" && err.code !== "EACCES") || process.platform !== "win32") {
+      throw err;
+    }
+    console.error(
+      `[secrets] Cannot read ${paths.SECRETS_KEY_FILE} (${err.code}). Repairing its permissions...`
+    );
+    try {
+      // Parent first: the file is reset to inherit, so the directory's ACL has
+      // to be the correct one by then.
+      applyDataDirAcl(paths.DATA_DIR);
+      repairFileAcl(paths.SECRETS_KEY_FILE);
+      const key = fs.readFileSync(paths.SECRETS_KEY_FILE);
+      console.log("[secrets] Permissions repaired, master key read successfully");
+      return key;
+    } catch (repairErr) {
+      console.error(
+        `[secrets] Could not repair the master key's permissions (${repairErr.message}).\n` +
+          `[secrets] The scheduler cannot start without it. Do NOT delete the file: every\n` +
+          `[secrets] stored secret is encrypted with it. From an elevated PowerShell, run:\n` +
+          `[secrets]   takeown /F "${paths.SECRETS_KEY_FILE}" /A\n` +
+          `[secrets]   icacls "${paths.SECRETS_KEY_FILE}" /reset\n` +
+          `[secrets] then restart the Marvin Scheduler service.`
+      );
+      process.exit(1);
+    }
+  }
+}
+
 function ensureKey() {
   if (fs.existsSync(paths.SECRETS_KEY_FILE)) {
-    return fs.readFileSync(paths.SECRETS_KEY_FILE);
+    return readKeyFile();
   }
   const key = crypto.randomBytes(32);
-  fs.writeFileSync(paths.SECRETS_KEY_FILE, key, { mode: 0o600 });
+  try {
+    fs.writeFileSync(paths.SECRETS_KEY_FILE, key, { mode: 0o600 });
+  } catch (err) {
+    console.error(
+      `[secrets] Could not create the master key at ${paths.SECRETS_KEY_FILE} ` +
+        `(${err.code || err.message}). The service runs as LocalSystem and needs ` +
+        `write access to ${paths.DATA_DIR}.`
+    );
+    process.exit(1);
+  }
   console.log(`[secrets] Generated new master key at ${paths.SECRETS_KEY_FILE}`);
   return key;
 }
@@ -611,34 +690,6 @@ function migrateSecretsAtRest() {
   }
 }
 
-// Lock the shared data directory to SYSTEM and Administrators, so a standard
-// user on the VM cannot read the schedule and secret files directly. The
-// service runs as LocalSystem, so it keeps access. Best-effort: a failure is
-// logged, and the at-rest encryption still protects the secret values.
-function hardenDataDir() {
-  if (process.platform !== "win32") return;
-
-  const marker = path.join(paths.DATA_DIR, ".acl-hardened");
-  if (fs.existsSync(marker)) return;
-
-  try {
-    // /inheritance:r drops inherited ACEs (including the Users read grant);
-    // /grant:r replaces the SYSTEM and Administrators grants with full control,
-    // inheritable by files and folders; /T recurses over existing children.
-    const cmd =
-      `icacls "${paths.DATA_DIR}" /inheritance:r ` +
-      `/grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" /T /C /Q`;
-    execSync(cmd, { windowsHide: true, stdio: "ignore" });
-    fs.writeFileSync(marker, new Date().toISOString());
-    console.log(`[scheduler] Restricted ${paths.DATA_DIR} to SYSTEM and Administrators`);
-  } catch (e) {
-    console.error(
-      `[scheduler] Could not restrict the data directory ACL (${e.message}). ` +
-        `Bundled secrets remain encrypted at rest, but the directory ACL was not tightened.`
-    );
-  }
-}
-
 function restoreSchedules() {
   const all = scheduleStore.getAll();
   for (const schedule of all) {
@@ -931,7 +982,6 @@ app.post("/api/schedules/import", (req, res) => {
 
 // ─── Start server ───
 
-hardenDataDir();
 migrateSecretsAtRest();
 restoreSchedules();
 

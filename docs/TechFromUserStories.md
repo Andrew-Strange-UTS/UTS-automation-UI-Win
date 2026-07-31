@@ -193,6 +193,22 @@ Not addressed here (AC6): any local user can still export a schedule with a pass
 Covered by `server/utils/scheduleSecrets.test.js` (8 `node --test` cases) over a fake reversible cipher and real AES-256-GCM: encrypt-on-save, empty-object drop, round trip, legacy read, no-secrets, corrupt-ciphertext tolerance, migration detection, and idempotent re-save. Manually verified the service boots and migrates a legacy plaintext file on startup.
 - `server/utils/scheduleSecrets.js`, `server/utils/scheduleSecrets.test.js`, `server/scheduler-service.js`, `docs/installing-on-a-vm.md`
 
+### EPEA-TBD-10 — Data directory hardening locked the service out of its own key
+The `hardenDataDir()` call added above ran, on the VM, as:
+
+```
+icacls "C:\ProgramData\uts-automation" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" /T /C /Q
+```
+
+`(OI)(CI)` are inheritance flags, which are only valid on a container. With `/T`, icacls walks into every existing child file, rejects the grant there as an invalid parameter, and, because of `/C`, carries on having already applied `/inheritance:r` to it. Each file was left with a protected, *empty* DACL: `Get-Acl` reports no `Access` entries and an SDDL of `O:BAG:SYD:PAI`. An empty DACL denies everyone, including SYSTEM, so the next service start died at module load in `ensureKey()` with `EPERM: operation not permitted, open '...\secrets_master_key'`, and no schedule ran. It survived the first run only because the key was created before hardening.
+
+The ACL work moved out of the service monolith into `server/utils/dataDirAcl.js`, where the commands are built by pure functions and the executor is injectable, so the shapes can be tested off Windows. `dataDirAclCommands(dir)` returns two commands: the directory grant, now without `/T`, and `icacls "<dir>\*" /reset /T /C /Q`, which drops each child's own ACL so it inherits the directory's. `fileAclRepairCommands(file)` returns `takeown /F <file> /A` followed by `icacls <file> /reset`: an empty DACL grants nobody `WRITE_DAC`, so a reset alone fails unless the caller owns the file, and LocalSystem's `SeTakeOwnershipPrivilege` is what makes taking it possible from the service.
+
+Recovery for machines already broken: the marker guarding the one-time hardening is now `.acl-hardened-v2`, so those installs re-run it and the `/reset` pass repairs every locked file. `hardenDataDir()` also moved ahead of the secrets store in module order, so the directory is correct before anything opens a file in it, and a newly generated key is never left in a loosely-permissioned directory. As a last resort `readKeyFile()` catches `EPERM`/`EACCES` on the key specifically, re-applies the directory ACL, takes ownership of the file, resets it and retries; if that still fails it prints the two elevated commands an admin should run and exits, instead of a raw stack trace. It never regenerates the key over an unreadable one: that would orphan every encrypted secret. Key *creation* failures are reported the same way.
+
+Covered by `server/utils/dataDirAcl.test.js` (7 `node --test` cases): the directory command never carries `/T`, the children command resets and never grants, only the two expected SIDs appear, ordering is directory-then-children, an empty directory is not a failure, and a failing `takeown` still lets the reset run. Documented, with the manual repair, in `docs/building-and-installing.md`.
+- `server/utils/dataDirAcl.js`, `server/utils/dataDirAcl.test.js`, `server/scheduler-service.js`, `docs/building-and-installing.md`
+
 ### EPEA-TBD-5 — Stop a running sequence from the Run Sequence panel
 `routes/sequence.js` keeps an `activeRuns` map of interactive runs keyed by a client-supplied `runId`; the client generates it because the run response is a plain-text stream with no body to read an id back from. `POST /api/sequence/stop` stops that run, or every active run when no id is given, and returns `{ stopped, running }`. Stopping nothing is a 200 no-op rather than an error.
 

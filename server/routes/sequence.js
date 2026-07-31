@@ -7,7 +7,7 @@ const { spawn } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
 const router = express.Router();
 const { TESTS_ROOT } = require("../utils/paths");
-const { getChromeBinary, isSnapChromium } = require("../utils/chromeFinder");
+const { getChromeBinary, isSnapChromium, getHeadlessUserAgent } = require("../utils/chromeFinder");
 const BUILTINS_DIR = path.join(__dirname, "../builtins");
 
 // --- Import secrets handling utilities ---
@@ -138,6 +138,10 @@ ${chromeBinaryLine}
   options.addArguments("--no-sandbox","--disable-dev-shm-usage");
   if (process.env.VISUAL_BROWSER !== "true") {
     options.addArguments("--headless=new","--disable-gpu","--window-size=1920,1080");
+    // Headless Chrome advertises "HeadlessChrome" and gets blocked by the WAF in
+    // front of the UTS sites (a 403 page instead of the site). Look like ordinary
+    // Chrome so the test sees the real page.
+    options.addArguments(${JSON.stringify("--user-agent=" + getHeadlessUserAgent())});
   }
   let driver;
   let failedCount = 0;

@@ -10,6 +10,7 @@ const scheduleStore = require("./scheduleStore");
 const secretsStore = require("./secrets");
 
 const { TESTS_ROOT } = require("./utils/paths");
+const { getHeadlessUserAgent } = require("./utils/chromeFinder");
 const BUILTINS_DIR = path.join(__dirname, "./builtins");
 
 // Active cron jobs keyed by schedule ID
@@ -110,6 +111,9 @@ function compileAndRun(schedule, onLog, onDone) {
   const remoteUrl = process.env.SELENIUM_REMOTE_URL;
   const options = new chrome.Options();
   options.addArguments("--headless=new","--disable-gpu","--no-sandbox","--window-size=1920,1080");
+  // "HeadlessChrome" in the User-Agent is blocked by the WAF in front of the UTS
+  // sites, so present the ordinary Chrome string instead.
+  options.addArguments(${JSON.stringify("--user-agent=" + getHeadlessUserAgent())});
   let driver;
   let failedCount = 0;
   let passedCount = 0;

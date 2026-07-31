@@ -16,7 +16,7 @@ const { v4: uuidv4 } = require("uuid");
 const paths = require("./scheduler-service-paths");
 const { portableEncrypt, portableDecrypt } = require("./utils/portableEncryption");
 const { makeScheduleSecrets } = require("./utils/scheduleSecrets");
-const { getChromeBinary } = require("./utils/chromeFinder");
+const { getChromeBinary, getHeadlessUserAgent } = require("./utils/chromeFinder");
 
 const PORT = parseInt(process.env.UTS_SCHEDULER_PORT || "5050", 10);
 
@@ -288,6 +288,9 @@ function compileAndRun(schedule, onLog, onDone) {
 ${chromeBinaryLine}
   options.addArguments("--no-sandbox","--disable-dev-shm-usage");
   options.addArguments("--headless=new","--disable-gpu","--window-size=1920,1080");
+  // Scheduled runs are always headless, so they always need the ordinary Chrome
+  // User-Agent: "HeadlessChrome" is blocked by the WAF in front of the UTS sites.
+  options.addArguments(${JSON.stringify("--user-agent=" + getHeadlessUserAgent())});
   let driver;
   let failedCount = 0;
   let passedCount = 0;

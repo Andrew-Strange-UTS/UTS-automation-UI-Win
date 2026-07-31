@@ -102,6 +102,29 @@ function isSnapChromium(binaryPath) {
   }
 }
 
+// Chrome's headless mode advertises itself as "HeadlessChrome/<version>" in the
+// User-Agent. WAFs (AWS CloudFront / WAF in front of the UTS sites) block that
+// outright, so a headless run gets a 403 page instead of the site and every web
+// test fails. Passing --user-agent with the ordinary desktop Chrome string makes
+// headless runs look like the same browser a person would use.
+const UA_PLATFORM = {
+  win32: "Windows NT 10.0; Win64; x64",
+  darwin: "Macintosh; Intel Mac OS X 10_15_7",
+};
+// Only used if the installed Chrome's version can't be read.
+const UA_FALLBACK_MAJOR = "140";
+
+function buildHeadlessUserAgent(version, platform = process.platform) {
+  const major = /^(\d+)\./.test(String(version || ""))
+    ? String(version).split(".")[0]
+    : UA_FALLBACK_MAJOR;
+  const osToken = UA_PLATFORM[platform] || "X11; Linux x86_64";
+  return (
+    `Mozilla/5.0 (${osToken}) AppleWebKit/537.36 (KHTML, like Gecko) ` +
+    `Chrome/${major}.0.0.0 Safari/537.36`
+  );
+}
+
 // Cache results since binary location won't change during process lifetime
 let cachedBinary = undefined;
 let cachedVersion = undefined;
@@ -125,4 +148,15 @@ function getChromeVersionCached() {
   return cachedVersion;
 }
 
-module.exports = { getChromeBinary, getChromeVersion: getChromeVersionCached, isSnapChromium };
+function getHeadlessUserAgent() {
+  return buildHeadlessUserAgent(getChromeVersionCached());
+}
+
+module.exports = {
+  getChromeBinary,
+  getChromeVersion: getChromeVersionCached,
+  isSnapChromium,
+  getHeadlessUserAgent,
+  // Exported for tests: the pure part, with no dependency on the local machine.
+  buildHeadlessUserAgent,
+};

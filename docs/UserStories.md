@@ -317,6 +317,20 @@
 
 ---
 
+### EPEA-TBD-9 — Web tests always ran headless and were blocked by the WAF `5 pts`
+
+**Description:** Two faults stacked on top of each other in Web mode. "Enable visual browser" was ticked on the test card and shown in the Run Sequence panel, but the flag was dropped when the payload was built, so the backend never saw it and every run was headless. Headless Chrome identifies itself as `HeadlessChrome` in the User-Agent, which the WAF in front of the UTS sites blocks: the test got a CloudFront "403 ERROR / Request blocked" page instead of the site, so it failed and the failure screenshot showed the 403 rather than the page under test. Together this also meant OKTA-wrapped sequences could never work, since the login step needs a visible window for the user to authenticate.
+
+**Acceptance Criteria:**
+- [x] AC1: Ticking "Enable visual browser" on a web test card actually opens a visible Chrome window for the run.
+- [x] AC2: A sequence containing an OKTA-wrapped test runs visibly, so the user can complete the login.
+- [x] AC3: Headless web runs present the ordinary desktop Chrome User-Agent, built from the installed Chrome's version, and are not blocked by the WAF.
+- [x] AC4: The built-in default web test passes headless against the UTS Course Handbook.
+- [x] AC5: Scheduled runs (always headless, no interactive desktop) get the same User-Agent treatment.
+- [ ] AC6: Verified on the VM with a rebuilt installer. *(Awaiting confirmation.)*
+
+---
+
 ### EPEA-2501 — OKTA login wrapping for web tests `8 pts`
 
 **Description:** Port OKTA wrapping from v2. Test cards have an OKTA Environment selector (None, Prod, Pre-prod, Test). The sequence runner injects okta-login before and okta-login-finish after tests in the same OKTA group, reusing the browser session.

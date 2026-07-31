@@ -168,9 +168,12 @@ export default function RunSequence({
     setIsStopping(false);
   
 
-    // Prepare backend payload for sequence
+    // Prepare backend payload for sequence. visualBrowser has to travel with the
+    // step: the backend decides headless vs visible from the steps it is sent, so
+    // dropping it here left the toggle with no effect at all.
     const simpleSeq = wrappedSequence.map((step) => ({
       name: step.name,
+      ...(step.visualBrowser ? { visualBrowser: true } : {}),
       ...(step.zephyr ? { zephyr: step.zephyr } : {}),
       ...(step.builtin ? { builtin: step.builtin } : {}),
       ...(step.oktaUrl ? { oktaUrl: step.oktaUrl } : {}),

@@ -907,8 +907,12 @@ export default function App() {
               }
             }
             wrapped.push(...noOktaTests);
+            // Same shape as the payload RunSequence sends. The scheduler service
+            // always runs headless (no interactive desktop), but the flag is kept
+            // so a saved schedule matches the sequence it was created from.
             const simpleSeq = wrapped.map((step) => ({
               name: step.name,
+              ...(step.visualBrowser ? { visualBrowser: true } : {}),
               ...(step.zephyr ? { zephyr: step.zephyr } : {}),
               ...(step.builtin ? { builtin: step.builtin } : {}),
               ...(step.oktaUrl ? { oktaUrl: step.oktaUrl } : {}),

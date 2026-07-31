@@ -2,11 +2,15 @@
 // Generates the Selenium WebDriver setup code for web tests.
 // Supports remote Selenium Grid, local Chrome, and Chromium.
 
-const { getChromeBinary } = require("../utils/chromeFinder");
+const { getChromeBinary, getHeadlessUserAgent } = require("../utils/chromeFinder");
 
 function getWebDriverSetupCode() {
   const remoteUrl = process.env.SELENIUM_REMOTE_URL;
   const chromeBinary = getChromeBinary();
+  // Headless Chrome's own User-Agent says "HeadlessChrome", which the WAF in
+  // front of the UTS sites blocks with a 403 page.
+  const userAgentLine =
+    `    options.addArguments(${JSON.stringify("--user-agent=" + getHeadlessUserAgent())});`;
 
   if (remoteUrl) {
     // Remote Selenium Grid (Docker setup)
@@ -16,6 +20,7 @@ function getWebDriverSetupCode() {
   options.addArguments("--no-sandbox","--disable-dev-shm-usage");
   if (process.env.VISUAL_BROWSER !== "true") {
     options.addArguments("--headless=new","--disable-gpu","--window-size=1920,1080");
+${userAgentLine}
   }
   let driver;
   let failedCount = 0;
@@ -36,6 +41,7 @@ ${binaryLine}
   options.addArguments("--no-sandbox","--disable-dev-shm-usage");
   if (process.env.VISUAL_BROWSER !== "true") {
     options.addArguments("--headless=new","--disable-gpu","--window-size=1920,1080");
+${userAgentLine}
   }
   let driver;
   let failedCount = 0;

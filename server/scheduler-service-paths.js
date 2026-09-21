@@ -20,6 +20,10 @@ const DATA_DIR = getSharedDataDir();
 const SCHEDULES_FILE = path.join(DATA_DIR, "schedules.json");
 const SECRETS_FILE = path.join(DATA_DIR, "secrets.json.enc");
 const SECRETS_KEY_FILE = path.join(DATA_DIR, "secrets_master_key");
+// Written by the automation account setup; holds the account name only, never
+// a credential. The service needs no password: WTSQueryUserToken hands
+// LocalSystem a token for an already logged-on session.
+const AUTOMATION_ACCOUNT_FILE = path.join(DATA_DIR, "automation-account.json");
 const TESTS_ROOT = path.join(DATA_DIR, "repo", "tests");
 const BUILTINS_DIR = path.join(DATA_DIR, "builtins");
 const RUNNERS_DIR = path.join(DATA_DIR, "runners");
@@ -39,6 +43,7 @@ module.exports = {
   SCHEDULES_FILE,
   SECRETS_FILE,
   SECRETS_KEY_FILE,
+  AUTOMATION_ACCOUNT_FILE,
   TESTS_ROOT,
   BUILTINS_DIR,
   RUNNERS_DIR,

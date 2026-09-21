@@ -16,7 +16,9 @@ const { v4: uuidv4 } = require("uuid");
 const paths = require("./scheduler-service-paths");
 const { portableEncrypt, portableDecrypt } = require("./utils/portableEncryption");
 const { makeScheduleSecrets } = require("./utils/scheduleSecrets");
-const { applyDataDirAcl, repairFileAcl } = require("./utils/dataDirAcl");
+const { applyDataDirAcl, repairFileAcl, applyAutomationAccess } = require("./utils/dataDirAcl");
+const sessionLauncher = require("./utils/sessionLauncher");
+const { readAccountName } = require("./utils/automationAccount");
 const {
   DataStoreError,
   readJsonWithRepair,
@@ -556,7 +558,33 @@ main();
     childEnv.SELENIUM_REMOTE_URL = process.env.SELENIUM_REMOTE_URL;
   }
 
-  const child = spawn("node", ["run.js"], { cwd: seqDir, env: childEnv });
+  // Desktop steps cannot run in Session 0, which is where everything this
+  // service spawns lands (EPEA-TBD-13). They need the automation account's
+  // interactive desktop. Web steps never cared: headless Chrome has no need of
+  // a desktop, which is why scheduled web tests worked all along.
+  const automation = isDesktop && process.platform === "win32" ? automationUser() : null;
+
+  if (isDesktop && process.platform === "win32" && !automation) {
+    // Failing loudly beats running it in Session 0, where every keystroke comes
+    // back as "Access is denied" and reads like a broken test rather than a
+    // machine that cannot run tests.
+    const message =
+      "No automation account is set up, so this desktop sequence has no interactive session to run in.\n" +
+      "Scheduled desktop tests need a dedicated always-logged-on account. Run the automation account setup on this machine.\n";
+    onLog(message);
+    setImmediate(() => onDone(1));
+    return null;
+  }
+
+  const child = automation
+    ? sessionLauncher.startRunInSession({
+        user: automation,
+        seqDir,
+        env: childEnv,
+        nodeExe: process.execPath,
+        script: "run.js",
+      })
+    : spawn("node", ["run.js"], { cwd: seqDir, env: childEnv });
 
   child.stdout.on("data", (chunk) => {
     const text = chunk.toString();
@@ -800,12 +828,55 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 
+// ─── Desktop session (EPEA-TBD-13) ───
+//
+// Desktop steps cannot run in Session 0, so scheduled desktop tests need the
+// automation account's interactive session. Only this service can check it:
+// WTSQueryUserToken is LocalSystem's privilege, and the per-user backend has no
+// way to ask. Probing launches a real process in that session rather than
+// inferring from the account existing, because a locked session looks
+// identical from the outside and cannot receive a keystroke.
+
+function automationUser() {
+  // Not set up, unreadable or malformed all mean the same thing: not
+  // configured. Guessing an account name here would run tests as the wrong
+  // user, which is worse than not running them.
+  return readAccountName(paths.AUTOMATION_ACCOUNT_FILE);
+}
+
+// The probe starts a process, so it is not free. Health is polled during
+// startup recovery, and a probe per poll would be a process per poll.
+const SESSION_PROBE_TTL_MS = 15000;
+let sessionProbeCache = { at: 0, value: null };
+
+async function checkDesktopSession() {
+  const now = Date.now();
+  if (sessionProbeCache.value && now - sessionProbeCache.at < SESSION_PROBE_TTL_MS) {
+    return sessionProbeCache.value;
+  }
+  const value = await sessionLauncher.probeSession({ user: automationUser() });
+  sessionProbeCache = { at: now, value };
+  return value;
+}
+
 // Health check. Uptime alone says nothing about whether the service can read
 // or write its own data directory, which is the state that hid a two-month
 // outage behind a green tick.
-app.get("/api/health", (req, res) => {
+app.get("/api/health", async (req, res) => {
   const store = checkStore();
+
+  // Reported separately from `status`: a missing desktop session stops desktop
+  // schedules and nothing else. Web schedules keep running, so it must not turn
+  // the whole service red.
+  let desktopSession;
+  try {
+    desktopSession = await checkDesktopSession();
+  } catch (err) {
+    desktopSession = { ok: false, reason: "unreadable", cause: err.message };
+  }
+
   res.status(store.ok ? 200 : 503).json({
+    desktopSession,
     status: store.ok ? "ok" : "degraded",
     uptime: process.uptime(),
     schedules: store.schedules,
@@ -1097,6 +1168,26 @@ app.use((err, req, res, next) => {
   });
 });
 
+// The automation account runs scheduled desktop tests, so it needs to read the
+// runners, utils, builtins and test repo, and write its own run directory. Per
+// path, never the data directory itself: that holds the schedule store, the
+// encrypted secrets and the master key (EPEA-TBD-13 AC11).
+function grantAutomationAccess() {
+  if (process.platform !== "win32") return;
+  const user = automationUser();
+  if (!user) return;
+  try {
+    applyAutomationAccess(paths.DATA_DIR, user);
+    console.log(`[scheduler] Granted ${user} access to the run directories`);
+  } catch (err) {
+    console.error(
+      `[scheduler] Could not grant ${user} access to the run directories (${err.message}). ` +
+        "Scheduled desktop tests will fail until this is fixed."
+    );
+  }
+}
+
+grantAutomationAccess();
 migrateSecretsAtRest();
 restoreSchedules();
 

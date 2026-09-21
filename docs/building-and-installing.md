@@ -145,16 +145,26 @@ two `.lnk` files the script reports.
 
 The scheduler service owns schedule storage and execution. Without it installed,
 the schedules screen has nothing to talk to and no user sees any schedules.
-Install it once per machine, from an elevated prompt after installing Marvin:
+Install it once per machine, from an elevated prompt after installing Marvin.
+**Point it at the installed copy**, not at the checkout you are standing in:
+without `--script` it registers the `server` folder next to the script, so a
+service installed from a clone keeps running from that clone.
 
 ```powershell
-node scripts\install-service-win.js
+node scripts\install-service-win.js --script "C:\Program Files\Marvin\resources\app\server\scheduler-service.js"
 ```
 
-To remove it:
+`deploy-win.ps1` does this for you. To remove it, name the same path it was
+installed with (node-windows derives the daemon directory from that path):
 
 ```powershell
-node scripts\uninstall-service-win.js
+node scripts\uninstall-service-win.js --script "C:\Program Files\Marvin\resources\app\server\scheduler-service.js"
+```
+
+Which copy owns the service today:
+
+```powershell
+Get-CimInstance Win32_Service -Filter "Name like 'marvin%'" | Select Name, StartName, PathName | Format-List
 ```
 
 On Linux the equivalent is a systemd unit:

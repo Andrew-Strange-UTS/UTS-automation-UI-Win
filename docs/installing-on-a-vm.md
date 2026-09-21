@@ -5,16 +5,158 @@ nav_order: 8
 
 # Installing Marvin on a Windows VM
 
-This page is for whoever deploys Marvin to a Windows VM, especially a **shared,
-multi-user VM** where several people log in and everyone needs the app and the
-same set of scheduled tests. It covers prerequisites, the two install methods,
-the scheduler service, verification, and the problems you are most likely to
-hit on a managed (locked-down) machine.
+**Follow the steps.** They are the whole install, in order, for a shared Windows
+VM. Everything under [Reference](#reference) explains why a step exists and what
+to do when one goes wrong; you do not need to read it to install Marvin.
 
 If you are building the installer rather than deploying it, see
 [Building and Installing](building-and-installing.html).
 
-## What you need on the VM first
+## Before you start
+
+- **Node.js 20+ and Git, installed for _all users_.** A "just me" install is
+  invisible to other profiles and to the scheduler service, which is the single
+  most common problem on a shared VM. See
+  [What you need on the VM first](#what-you-need-on-the-vm-first).
+- **Administrator rights.** The install is machine-wide.
+- **Never delete `C:\ProgramData\uts-automation`.** It holds every schedule and
+  `secrets_master_key`. Every secret, stored or bundled into a schedule, is
+  encrypted with that key and cannot be recovered without it. Nothing in this
+  guide asks you to remove it.
+
+## Install it: the steps
+
+All of this runs in **one elevated PowerShell window** (right-click PowerShell,
+**Run as administrator**). Every step has a **Check**. If a check does not look
+right, stop and read the matching part of [Reference](#reference).
+
+Steps 6 and 7 are only for **scheduled desktop tests**. Skip them if you only
+schedule web tests.
+
+### 1. Close Marvin
+
+Close it in every session on the VM. A running copy locks its own files and the
+install will fail.
+
+### 2. Update the clone you build from
+
+The clone is your **build source**. It is not where the installed app runs.
+
+```powershell
+cd C:\Users\<you>\UTS-win-automation-UI
+git pull
+npm install
+cd renderer; npm install; cd ..
+cd server; npm install; cd ..
+```
+
+### 3. Remove the old service
+
+Skip this on a VM that has never had Marvin installed.
+
+This must happen **before** you install, and it must name the path the service
+was registered with. If Marvin was previously run from a clone, that is the
+clone's path:
+
+```powershell
+Stop-Service -DisplayName "Marvin Scheduler" -ErrorAction SilentlyContinue
+node scripts\uninstall-service-win.js --script "C:\Users\<you>\UTS-win-automation-UI\server\scheduler-service.js"
+Remove-Item -Recurse -Force C:\Users\<you>\UTS-win-automation-UI\server\daemon -ErrorAction SilentlyContinue
+```
+
+**Check** — this should return nothing:
+
+```powershell
+Get-Service -DisplayName "Marvin Scheduler" -ErrorAction SilentlyContinue
+```
+
+Not sure which copy owns the service? See
+[Remove an older install first](#remove-an-older-install-first).
+
+### 4. Build
+
+```powershell
+npm run dist
+```
+
+A few minutes. Ending with `spawn EPERM` on NSIS is normal on a managed machine:
+the folder you need, `dist\win-unpacked`, is already built.
+
+**Check** — `dist\win-unpacked\Marvin.exe` exists.
+
+### 5. Install machine-wide
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\deploy-win.ps1
+```
+
+This copies the app to `C:\Program Files\Marvin`, creates the all-users
+shortcuts, and registers the scheduler service against the copy it just
+installed.
+
+**Check** — `PathName` must be inside `C:\Program Files\Marvin`, not a user
+profile, and the service must answer:
+
+```powershell
+Get-CimInstance Win32_Service -Filter "Name like 'marvin%'" | Select Name, StartName, PathName | Format-List
+Invoke-RestMethod http://localhost:5050/api/health | Format-List
+```
+
+`status` should be `ok`, and `schedules` should be the number of schedules you
+expect. A `degraded` status names the file it cannot read or write: fix that
+before going further, because the service cannot list or save a schedule in that
+state.
+
+### 6. Create the automation account
+
+**Scheduled desktop tests only.** They need a desktop, and the service does not
+have one, so they run in a dedicated account's session that stays signed in. See
+[Set up the automation account](#set-up-the-automation-account-scheduled-desktop-tests-only)
+for what this does and why.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup-automation-account.ps1 -AppDir "C:\Program Files\Marvin"
+```
+
+**Check** — read the `warnings` list it prints. A warning about
+`InactivityTimeoutSecs` means a machine-wide policy will lock the automation
+session and desktop schedules will fail once it fires; that VM needs an
+exemption.
+
+### 7. Reboot
+
+The VM signs itself in as the automation account and stays signed in. That
+session is the desktop your overnight runs use. Sign back in as yourself
+afterwards as normal, then:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup-automation-account.ps1 -Mode settings
+```
+
+Only needed if step 6 said the profile did not exist yet. Running it again is
+harmless.
+
+### 8. Check it in the app
+
+Open Marvin and look at the startup checks:
+
+- **Scheduler Service** green, with your schedules loaded.
+- **Desktop Session** green, naming a session (desktop schedules only).
+
+A red row names the cause and the fix. There is a fuller list in
+[Verify the install](#verify-the-install).
+
+### 9. Prove it end to end
+
+Schedule a **desktop** sequence a few minutes out, then disconnect your RDP
+session and wait. Nothing else proves a run works with no human signed in, which
+is the entire point of the automation account.
+
+## Reference
+
+Everything below is explanation and troubleshooting. Read the part you need.
+
+### What you need on the VM first
 
 | Requirement | Why | Check |
 |---|---|---|
@@ -34,7 +176,7 @@ without them, so treat both as hard prerequisites.
 > when pulling a test repo. Install both machine-wide, then have each user start
 > a fresh session so the system `PATH` is picked up.
 
-## How multi-user works
+### How multi-user works
 
 Understanding this up front avoids surprises on a shared VM.
 
@@ -65,7 +207,7 @@ Understanding this up front avoids surprises on a shared VM.
 > for your VM, restrict who can reach the app, and treat closing it as a
 > follow-up (it needs per-user schedule ownership).
 
-## Remove an older install first
+### Remove an older install first
 
 Do this before reinstalling, especially if Marvin was previously run from a
 **git clone in someone's profile** (for example
@@ -113,7 +255,7 @@ What is safe to remove:
 | `%APPDATA%\Marvin` (per-user tests, sequences, secrets) | Only if you want that user to start clean |
 | `C:\ProgramData\uts-automation` | **No.** Losing the master key orphans every secret |
 
-## Method 1: the NSIS installer (if it builds)
+### Method 1: the NSIS installer (if it builds)
 
 If you have a working `Marvin Setup <version>.exe` (80 to 150 MB, not a few
 hundred KB, see the troubleshooting note below):
@@ -123,7 +265,7 @@ hundred KB, see the troubleshooting note below):
    creates all-users shortcuts.
 3. Install the scheduler service (next section).
 
-## Method 2: the PowerShell deploy script (recommended on locked-down VMs)
+### Method 2: the PowerShell deploy script (recommended on locked-down VMs)
 
 On many managed/corporate machines the NSIS installer **cannot be built**,
 because the security policy blocks the downloaded `makensis.exe` from running
@@ -154,7 +296,7 @@ caught before it is installed, not after).
 **Close Marvin on every logged-in session before running it.** A running
 instance locks its own files and the copy will fail.
 
-## Install the scheduler service
+### Install the scheduler service
 
 **Required for schedules to work at all.** Without it, the schedules screen has
 nothing to talk to and no user sees any schedules. `deploy-win.ps1` registers it
@@ -196,7 +338,7 @@ node scripts\uninstall-service-win.js --script "C:\Program Files\Marvin\resource
 Marvin also tries to start the service automatically if it finds it stopped, so
 in normal use you should not need to touch it after install.
 
-## Set up the automation account (scheduled desktop tests only)
+### Set up the automation account (scheduled desktop tests only)
 
 **Scheduled web tests need nothing here.** Scheduled *desktop* tests do, and
 without it they cannot work at all.
@@ -261,7 +403,7 @@ because Windows grants Users read and execute there. A clone under
 `C:\Users\<someone>` is not, and no amount of configuration will make it
 work.
 
-## Verify the install
+### Verify the install
 
 Log in as a **second, non-administrator user** (this is the real test of a
 multi-user deployment, the installing admin would see the icon either way) and
@@ -276,7 +418,7 @@ confirm:
    `https://github.com/Perpaterb/win-marvin-tests`) to the run sequence and click
    **Run Sequence**.
 
-## Upgrading an existing install
+### Upgrading an existing install
 
 1. Close Marvin in every logged-in session.
 2. Re-run `deploy-win.ps1` (or the new NSIS installer). The deploy script
@@ -298,7 +440,7 @@ confirm:
    a service that cannot reach its data directory used to report zero schedules
    and look healthy.
 
-## Troubleshooting
+### Troubleshooting
 
 **"Marvin Setup .exe" is only a few hundred KB.** That is a leftover fragment,
 not an installer. The NSIS build failed (see `spawn EPERM` above). A real

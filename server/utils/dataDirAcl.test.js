@@ -73,7 +73,7 @@ test("a failing takeown still lets the reset run, and a failing reset surfaces",
 
 // ─── Automation account access (EPEA-TBD-13 AC11) ───
 
-const { automationAccessCommands, AUTOMATION_READ_DIRS } = require("./dataDirAcl");
+const { automationAccessCommands, applyAutomationAccess, AUTOMATION_READ_DIRS } = require("./dataDirAcl");
 
 test("the automation account is never granted the data directory itself", () => {
   // schedules.json, secrets.json.enc and secrets_master_key live at the root.
@@ -105,11 +105,36 @@ test("the grants never recurse, which is what emptied every DACL last time", () 
   }
 });
 
-test("a bare account name is qualified as local, never left ambiguous", () => {
-  // Unqualified, icacls can resolve it to a domain principal of the same name.
-  const local = automationAccessCommands(DIR, "marvin-auto")[0];
-  assert.match(local, /"\.\\marvin-auto:/);
+test("a bare account name is qualified with the computer, not with .\\", () => {
+  // `.\name` is accepted by icacls on a domain-joined machine, applies to
+  // nobody, and still reports success. The account then has no access to its
+  // own run directory and the only symptom is "Access is denied" somewhere
+  // else entirely.
+  const [cmd] = automationAccessCommands(DIR, "marvin-auto", { COMPUTERNAME: "PRDITDJUMP02" });
+  assert.match(cmd, /"PRDITDJUMP02\\marvin-auto:/);
+  assert.ok(!cmd.includes(".\\marvin-auto"));
 
-  const explicit = automationAccessCommands(DIR, "VMNAME\\marvin-auto")[0];
+  const explicit = automationAccessCommands(DIR, "VMNAME\\marvin-auto", { COMPUTERNAME: "PRDITDJUMP02" })[0];
   assert.match(explicit, /"VMNAME\\marvin-auto:/, "an already-qualified name is left alone");
+});
+
+test("the grants are not quietened, because their output is the only failure signal", () => {
+  // icacls exits zero for an unresolvable principal, so /Q would throw away the
+  // one thing that says it did not work.
+  for (const cmd of automationAccessCommands(DIR, "marvin-auto", { COMPUTERNAME: "VM" })) {
+    assert.ok(!/\s\/Q\b/.test(cmd), `output must not be suppressed: ${cmd}`);
+  }
+});
+
+test("a grant that resolved to nobody is raised, not swallowed", () => {
+  const exec = () => "marvin-auto: No mapping between account names and security IDs was done.";
+  assert.throws(
+    () => applyAutomationAccess(DIR, "marvin-auto", exec),
+    /Some permissions were not granted/
+  );
+});
+
+test("grants that all succeed raise nothing", () => {
+  const exec = () => "processed file: C:\\ProgramData\\uts-automation\\tmp\nSuccessfully processed 1 files; Failed processing 0 files";
+  assert.doesNotThrow(() => applyAutomationAccess(DIR, "marvin-auto", exec));
 });

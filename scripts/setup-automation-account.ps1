@@ -213,6 +213,45 @@ public class MarvinLsa {
     }
 }
 
+# ─── Access to the run directories ───
+#
+# The service also does this at startup, but it can only do it once the account
+# file exists, and on a fresh machine the service starts before this script has
+# ever run. Do it here too: this is the point at which the account definitely
+# exists. Per directory, never the data directory itself, which holds the
+# schedule store, the encrypted secrets and the master key.
+function Grant-RunDirectoryAccess {
+    param([string]$Account, [string]$DataDir)
+
+    $principal = "$env:COMPUTERNAME\$Account"
+    $failures = @()
+
+    $grants = @(
+        @{ dir = "runners";  rights = "(OI)(CI)RX" },
+        @{ dir = "utils";    rights = "(OI)(CI)RX" },
+        @{ dir = "builtins"; rights = "(OI)(CI)RX" },
+        @{ dir = "repo";     rights = "(OI)(CI)RX" },
+        @{ dir = "tmp";      rights = "(OI)(CI)M" }
+    )
+
+    foreach ($grant in $grants) {
+        $target = Join-Path $DataDir $grant.dir
+        if (-not (Test-Path $target)) { New-Item -Path $target -ItemType Directory -Force | Out-Null }
+
+        # No /Q: icacls exits zero for a principal it could not resolve, so its
+        # output is the only signal that the grant did nothing.
+        $output = & icacls.exe $target /grant "$($principal):$($grant.rights)" /C 2>&1 | Out-String
+        if ($output -match "Failed processing [1-9]|Invalid parameter|No mapping between account names") {
+            $failures += "$($grant.dir): $($output.Trim())"
+        }
+    }
+
+    if ($failures.Count -gt 0) {
+        return @{ granted = $false; detail = "Some run directory permissions were not granted: $($failures -join '; ')" }
+    }
+    return @{ granted = $true }
+}
+
 # ─── Keep the session unlocked (only matters with an inactivity limit) ───
 #
 # Registered against the account and triggered at logon, so autologon after any
@@ -356,12 +395,16 @@ if ($keepAwakeScript -like "$env:SystemDrive\Users\*") {
 $keepAwake = Register-KeepAwakeTask -Sid $sid -ScriptPath $keepAwakeScript
 if (-not $keepAwake.registered) { $warnings += $keepAwake.detail }
 
+$access = Grant-RunDirectoryAccess -Account $Account -DataDir $DataDir
+if (-not $access.granted) { $warnings += $access.detail }
+
 @{
     ok = $true
     user = $Account
     sid = $sid
     lockSettingsApplied = $settings.applied
     keepAwakeRegistered = $keepAwake.registered
+    runDirectoryAccessGranted = $access.granted
     keepAwakeScript = $keepAwake.script
     warnings = $warnings
     next = "Reboot. The account signs in automatically, and Marvin's startup check will show the Desktop Session row green once it can open that session's input desktop."

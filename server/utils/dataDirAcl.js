@@ -70,20 +70,48 @@ function fileAclRepairCommands(file) {
 const AUTOMATION_READ_DIRS = ["runners", "utils", "builtins", "repo"];
 const AUTOMATION_WRITE_DIRS = ["tmp"];
 
-function automationAccessCommands(dataDir, account) {
-  const quoted = account.includes("\\") ? account : `.\\${account}`; // local account
+// `.\name` is not reliably resolvable by icacls on a domain-joined machine: the
+// grant is accepted, applies to nobody, and icacls still reports success. That
+// left the automation account with no access to its own run directory, which
+// showed up as "Access is denied" from the keep-alive and nowhere else.
+// Qualify with the computer name, which is unambiguous against a domain.
+function qualifyAccount(account, env = process.env) {
+  if (account.includes("\\")) return account;
+  const machine = env.COMPUTERNAME;
+  return machine ? `${machine}\\${account}` : account;
+}
+
+function automationAccessCommands(dataDir, account, env = process.env) {
+  const principal = qualifyAccount(account, env);
   const read = AUTOMATION_READ_DIRS.map(
-    (dir) => `icacls "${path.join(dataDir, dir)}" /grant "${quoted}:(OI)(CI)RX" /C /Q`
+    (dir) => `icacls "${path.join(dataDir, dir)}" /grant "${principal}:(OI)(CI)RX" /C`
   );
   const write = AUTOMATION_WRITE_DIRS.map(
-    (dir) => `icacls "${path.join(dataDir, dir)}" /grant "${quoted}:(OI)(CI)M" /C /Q`
+    (dir) => `icacls "${path.join(dataDir, dir)}" /grant "${principal}:(OI)(CI)M" /C`
   );
   return [...read, ...write];
 }
 
+// icacls reports an unresolvable principal on stdout and still exits zero, so
+// the output has to be read. Discarding it is how this failed silently.
 function applyAutomationAccess(dataDir, account, exec = execSync) {
+  const failures = [];
+
   for (const cmd of automationAccessCommands(dataDir, account)) {
-    run(cmd, exec);
+    let output = "";
+    try {
+      output = String(exec(cmd, { windowsHide: true, encoding: "utf8" }) || "");
+    } catch (err) {
+      failures.push(`${cmd}: ${err.message}`);
+      continue;
+    }
+    if (/Failed processing [1-9]|Invalid parameter|No mapping between account names/i.test(output)) {
+      failures.push(`${cmd}: ${output.trim().split("\n").slice(-2).join(" ")}`);
+    }
+  }
+
+  if (failures.length) {
+    throw new Error(`Some permissions were not granted:\n  ${failures.join("\n  ")}`);
   }
 }
 
@@ -112,6 +140,7 @@ function repairFileAcl(file, exec = execSync) {
 }
 
 module.exports = {
+  qualifyAccount,
   AUTOMATION_READ_DIRS,
   AUTOMATION_WRITE_DIRS,
   automationAccessCommands,

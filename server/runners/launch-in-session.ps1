@@ -27,7 +27,7 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet("probe", "launch", "desktopcheck")]
+    [ValidateSet("probe", "launch", "desktopcheck", "diagnose")]
     [string]$Mode = "probe",
 
     # The automation account whose session to use. Local account, name only.
@@ -246,7 +246,19 @@ function Get-LoggedOnUsers {
 }
 
 function Start-InSession {
-    param([int]$SessionId, [string]$Command, [string]$Directory, [bool]$WaitForExit, [int]$TimeoutMs)
+    param(
+        [int]$SessionId,
+        [string]$Command,
+        [string]$Directory,
+        [bool]$WaitForExit,
+        [int]$TimeoutMs,
+        # Variations, so the diagnose mode can isolate which of these Windows
+        # is objecting to. Defaults are exactly what production uses.
+        [string]$ApplicationName = $null,
+        [string]$Desktop = "winsta0\default",
+        [bool]$UseEnvironmentBlock = $true,
+        [int]$CreationFlags = -1
+    )
 
     $userToken = [IntPtr]::Zero
     if (-not [MarvinSession]::WTSQueryUserToken($SessionId, [ref]$userToken)) {
@@ -263,20 +275,26 @@ function Start-InSession {
 
         # Without the user's own environment block the child gets the service's,
         # so %APPDATA% and %TEMP% point at the SYSTEM profile.
-        if (-not [MarvinSession]::CreateEnvironmentBlock([ref]$envBlock, $primaryToken, $false)) {
-            $envBlock = [IntPtr]::Zero
+        if ($UseEnvironmentBlock) {
+            if (-not [MarvinSession]::CreateEnvironmentBlock([ref]$envBlock, $primaryToken, $false)) {
+                $envBlock = [IntPtr]::Zero
+            }
         }
 
         $si = New-Object MarvinSession+STARTUPINFO
         $si.cb = [Runtime.InteropServices.Marshal]::SizeOf($si)
-        $si.lpDesktop = "winsta0\default"   # the interactive desktop, not Session 0's
+        # The interactive desktop, not Session 0's. Empty string is NOT the same
+        # as null here: an empty lpDesktop is one of the documented ways to get
+        # ERROR_INVALID_NAME out of CreateProcessAsUser.
+        if ($Desktop) { $si.lpDesktop = $Desktop }
         $pi = New-Object MarvinSession+PROCESS_INFORMATION
 
-        $flags = $CREATE_UNICODE_ENVIRONMENT -bor $CREATE_NEW_CONSOLE
+        $flags = if ($CreationFlags -ge 0) { $CreationFlags } else { $CREATE_UNICODE_ENVIRONMENT -bor $CREATE_NEW_CONSOLE }
         $dir = if ($Directory) { $Directory } else { $null }
+        $app = if ($ApplicationName) { $ApplicationName } else { $null }
 
         $ok = [MarvinSession]::CreateProcessAsUserW(
-            $primaryToken, $null, $Command, [IntPtr]::Zero, [IntPtr]::Zero, $false,
+            $primaryToken, $app, $Command, [IntPtr]::Zero, [IntPtr]::Zero, $false,
             $flags, $envBlock, $dir, [ref]$si, [ref]$pi)
 
         if (-not $ok) {
@@ -397,6 +415,60 @@ exit 0
 
     Write-Result "launch-failed" @{ user = $User; sessionId = $session.SessionId; state = $stateName; exitCode = $outcome.exitCode; detail = "The probe process started but returned $($outcome.exitCode)." }
     exit 1
+}
+
+# ─── diagnose ───
+#
+# CreateProcessAsUser can fail for several unrelated reasons that all surface as
+# one Win32 error, so try the variants and report what each one does. Runs
+# through Start-InSession, the same function production uses, varying one input
+# at a time.
+
+if ($Mode -eq "diagnose") {
+    $childScript = 'exit 0'
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($childScript))
+    $cmd = "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
+    $powershellPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+
+    $variants = @(
+        @{ name = "as production (app=null, desktop=winsta0\default, env block, new console)"; args = @{} },
+        @{ name = "explicit application name"; args = @{ ApplicationName = $powershellPath } },
+        @{ name = "no desktop (inherit)"; args = @{ Desktop = $null } },
+        @{ name = "no environment block"; args = @{ UseEnvironmentBlock = $false; CreationFlags = 16 } },
+        @{ name = "working directory System32"; args = @{ Directory = (Join-Path $env:SystemRoot "System32") } },
+        @{ name = "CREATE_NO_WINDOW instead of CREATE_NEW_CONSOLE"; args = @{ CreationFlags = 134218752 } },
+        @{ name = "explicit app name + System32 working directory"; args = @{ ApplicationName = $powershellPath; Directory = (Join-Path $env:SystemRoot "System32") } }
+    )
+
+    $results = @()
+    foreach ($variant in $variants) {
+        $splat = @{
+            SessionId = $session.SessionId
+            Command = $cmd
+            Directory = $null
+            WaitForExit = $true
+            TimeoutMs = 15000
+        }
+        foreach ($key in $variant.args.Keys) { $splat[$key] = $variant.args[$key] }
+
+        $outcome = Start-InSession @splat
+        $results += [pscustomobject]@{
+            variant = $variant.name
+            reason = $outcome.reason
+            win32 = $outcome.win32
+            exitCode = $outcome.exitCode
+        }
+    }
+
+    Write-Output (@{
+        ok = [bool]($results | Where-Object { $_.reason -eq "ok" })
+        reason = "diagnose"
+        user = $User
+        sessionId = $session.SessionId
+        state = $stateName
+        results = $results
+    } | ConvertTo-Json -Depth 4 -Compress)
+    exit 0
 }
 
 # ─── launch ───

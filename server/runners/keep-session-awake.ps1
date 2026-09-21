@@ -73,11 +73,21 @@ Write-Output "[keep-awake] Running as $env:USERNAME in session $((Get-Process -I
 
 while ($true) {
     # dx/dy of zero: input for the purposes of the idle timer, no cursor movement.
+    # PowerShell returns a COPY of a nested struct, so `$evt.mi.dwFlags = ...`
+    # would set a field on a temporary and be silently lost, leaving dwFlags at
+    # zero and the injected event doing nothing. Build the inner struct first
+    # and assign it whole.
+    $mi = New-Object MarvinKeepAwake+MOUSEINPUT
+    $mi.dx = 0
+    $mi.dy = 0
+    $mi.mouseData = 0
+    $mi.dwFlags = $MOUSEEVENTF_MOVE
+    $mi.time = 0
+    $mi.dwExtraInfo = [IntPtr]::Zero
+
     $evt = New-Object MarvinKeepAwake+INPUT
     $evt.type = $INPUT_MOUSE
-    $evt.mi.dx = 0
-    $evt.mi.dy = 0
-    $evt.mi.dwFlags = $MOUSEEVENTF_MOVE
+    $evt.mi = $mi
 
     $sent = [MarvinKeepAwake]::SendInput(1, @($evt), $size)
     if ($sent -ne 1) {

@@ -304,7 +304,12 @@ if ($Mode -eq "all") {
     # writes a byte-order mark with that switch, and the service parses this
     # file as JSON, which a BOM breaks.
     $accountFile = Join-Path $DataDir "automation-account.json"
-    $accountJson = @{ user = $Account; configuredAt = (Get-Date).ToString("o") } | ConvertTo-Json
+    $recordedKeepAwake = if ($AppDir) { Join-Path $AppDir "resources\app\server\runners\keep-session-awake.ps1" } else { $null }
+    $accountJson = @{
+        user = $Account
+        configuredAt = (Get-Date).ToString("o")
+        keepAwakeScript = $recordedKeepAwake
+    } | ConvertTo-Json
     [System.IO.File]::WriteAllText($accountFile, $accountJson, (New-Object System.Text.UTF8Encoding($false)))
 } else {
     $sid = Get-AccountSid -Name $Account
@@ -319,10 +324,31 @@ if ($inactivity) { $warnings += $inactivity }
 # The keep-alive only exists because of a machine-wide inactivity limit, but
 # register it either way: the policy can be turned on later, and nobody would
 # connect a locked session at 3am to a policy change made weeks earlier.
-$keepAwakeScript = if ($AppDir) {
-    Join-Path $AppDir "resources\app\server\runners\keep-session-awake.ps1"
-} else {
-    Join-Path $PSScriptRoot "..\server\runners\keep-session-awake.ps1"
+$accountFile = Join-Path $DataDir "automation-account.json"
+
+# Resolution order matters. -AppDir is explicit. Otherwise reuse whatever was
+# recorded when the account was set up, because re-running with -Mode settings
+# used to silently re-point the task at this script's own location, which is
+# usually a profile the automation account cannot read.
+$keepAwakeScript = $null
+if ($AppDir) {
+    $keepAwakeScript = Join-Path $AppDir "resources\app\server\runners\keep-session-awake.ps1"
+} elseif (Test-Path $accountFile) {
+    try {
+        $recorded = (Get-Content $accountFile -Raw | ConvertFrom-Json).keepAwakeScript
+        if ($recorded) { $keepAwakeScript = $recorded }
+    } catch {
+        $keepAwakeScript = $null
+    }
+}
+if (-not $keepAwakeScript) {
+    $keepAwakeScript = Join-Path $PSScriptRoot "..\server\runners\keep-session-awake.ps1"
+}
+
+# A path under a user profile cannot be read by the automation account, so the
+# task would be registered and then fail silently at every logon.
+if ($keepAwakeScript -like "$env:SystemDrive\Users\*") {
+    $warnings += "The keep-alive script resolved to $keepAwakeScript, which is inside a user profile. The automation account cannot read another user's profile, so the task will fail at logon. Re-run with -AppDir pointing at the Marvin install."
 }
 $keepAwake = Register-KeepAwakeTask -Sid $sid -ScriptPath $keepAwakeScript
 if (-not $keepAwake.registered) { $warnings += $keepAwake.detail }

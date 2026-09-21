@@ -507,9 +507,36 @@ In order of preference:
    runs no interactive human sessions except administration, and the automation
    account cannot be signed into by a person: it is denied network and Remote
    Desktop logon, hidden from the sign-in screen, and nobody knows its password.
-2. **A sanctioned keep-alive** in the automation session, which resets the idle
-   timer so the limit never fires. This weakens the control for that session,
-   so agree it with whoever owns the policy rather than doing it quietly.
+2. **The built-in keep-alive**, which the setup script registers for you. It
+   runs in the automation session and injects a **zero-distance** mouse move
+   every four minutes: Windows counts it as input and resets the idle timer, but
+   the cursor does not move, so it cannot disturb a test that is driving the
+   mouse at that moment. A one-pixel jiggle would, which is why it is not one.
+
+   It is registered as a scheduled task triggered **at logon** for that account,
+   so autologon after any reboot brings it back with the session. Nothing needs
+   starting by hand.
+
+   It writes a heartbeat each cycle, and the **Desktop Session** startup check
+   reads it. If the keep-alive dies, the row still shows the session working but
+   adds a warning saying so, while the session is still unlocked and the problem
+   is still fixable. A scheduled task sitting in "Running" with a wedged script
+   behind it would otherwise look identical to one that is working.
+
+   Verify it, from an elevated prompt:
+
+   ```powershell
+   Get-ScheduledTask -TaskName "Marvin keep automation session awake" | Select TaskName, State
+   Get-Content C:\ProgramData\uts-automation\tmp\keep-awake.heartbeat
+   ```
+
+   The heartbeat should be within the last few minutes. If the file does not
+   exist, the keep-alive has never run in that session.
+
+   Be straight with whoever owns the policy about this: it is an inactivity
+   control being defeated for one account, even though that account cannot be
+   used by a person. Exempting the VM is the cleaner answer, which is why it is
+   still first on this list.
 3. **A reboot scheduled shortly before the run.** Autologon produces a fresh,
    unlocked session, and the limit only fires after the idle period. This is
    fragile (a run starting more than the limit after boot is back to square one)

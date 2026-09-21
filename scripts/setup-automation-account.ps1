@@ -213,6 +213,41 @@ public class MarvinLsa {
     }
 }
 
+# ─── Keep the session unlocked (only matters with an inactivity limit) ───
+#
+# Registered against the account and triggered at logon, so autologon after any
+# reboot brings it back with the session. It runs the script from the install
+# directory, which the account can read; this script's own location may be in
+# somebody's profile, which it cannot.
+function Register-KeepAwakeTask {
+    param([string]$Sid, [string]$ScriptPath, [int]$IntervalSeconds = 240)
+
+    $taskName = "Marvin keep automation session awake"
+
+    if (-not (Test-Path $ScriptPath)) {
+        return @{ registered = $false; detail = "Keep-alive not registered: $ScriptPath does not exist. Pass -AppDir pointing at the Marvin install." }
+    }
+
+    $action = New-ScheduledTaskAction -Execute "powershell.exe" `
+        -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`" -IntervalSeconds $IntervalSeconds -DataDir `"$DataDir`""
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $Account
+    $principal = New-ScheduledTaskPrincipal -UserId $Account -LogonType Interactive -RunLevel Limited
+    # Defaults would stop it after three days and refuse to start it on battery
+    # or while the machine is "idle", which is precisely when it is needed.
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+    $settings.DisallowStartIfOnBatteries = $false
+    $settings.StopIfGoingOnBatteries = $false
+    $settings.IdleSettings.StopOnIdleEnd = $false
+
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
+        -Principal $principal -Settings $settings `
+        -Description "Injects a zero-distance mouse move so the automation session does not hit the machine inactivity limit." | Out-Null
+
+    return @{ registered = $true; taskName = $taskName; script = $ScriptPath }
+}
+
 # ─── Run ───
 
 Assert-Elevated
@@ -277,11 +312,24 @@ if (-not $settings.applied) { $warnings += $settings.detail }
 $inactivity = Test-MachineInactivityLimit
 if ($inactivity) { $warnings += $inactivity }
 
+# The keep-alive only exists because of a machine-wide inactivity limit, but
+# register it either way: the policy can be turned on later, and nobody would
+# connect a locked session at 3am to a policy change made weeks earlier.
+$keepAwakeScript = if ($AppDir) {
+    Join-Path $AppDir "resources\app\server\runners\keep-session-awake.ps1"
+} else {
+    Join-Path $PSScriptRoot "..\server\runners\keep-session-awake.ps1"
+}
+$keepAwake = Register-KeepAwakeTask -Sid $sid -ScriptPath $keepAwakeScript
+if (-not $keepAwake.registered) { $warnings += $keepAwake.detail }
+
 @{
     ok = $true
     user = $Account
     sid = $sid
     lockSettingsApplied = $settings.applied
+    keepAwakeRegistered = $keepAwake.registered
+    keepAwakeScript = $keepAwake.script
     warnings = $warnings
     next = "Reboot. The account signs in automatically, and Marvin's startup check will show the Desktop Session row green once it can open that session's input desktop."
 } | ConvertTo-Json -Depth 4

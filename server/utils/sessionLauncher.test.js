@@ -10,6 +10,7 @@ const assert = require("node:assert");
 
 const {
   Reason,
+  KEEP_AWAKE_STALE_SECONDS,
   buildProbeArgs,
   buildLaunchArgs,
   buildRedirectedCommandLine,
@@ -129,9 +130,48 @@ test("a disconnected but working session is reported green, with the screenshot 
   assert.match(hint, /blank|tscon/i, "disconnected sessions render nothing, so captures come back blank");
 });
 
-test("a healthy active session carries no warning", () => {
-  const { hint } = describeReason({ reason: Reason.OK, user: USER, sessionId: 1, state: "active" });
+test("a healthy active session with the keep-alive running carries no warning", () => {
+  const { hint } = describeReason({
+    reason: Reason.OK, user: USER, sessionId: 1, state: "active", keepAwakeAgeSeconds: 12,
+  });
   assert.strictEqual(hint, undefined);
+});
+
+test("a session with nothing keeping it awake is flagged while it still works", () => {
+  // A session that is fine right now can be minutes from locking, and a locked
+  // session cannot be unlocked: the password is discarded at setup by design.
+  // Saying so only once it has locked is too late to be useful.
+  const { cause, hint } = describeReason({
+    reason: Reason.OK, user: USER, sessionId: 1, state: "active",
+  });
+
+  assert.match(cause, /Session 1/, "it is still reported as a working session");
+  assert.match(hint, /nothing is keeping it awake/);
+  assert.match(hint, /inactivity limit/);
+});
+
+test("a keep-alive that has stopped reporting is flagged, with how long ago", () => {
+  const { hint } = describeReason({
+    reason: Reason.OK, user: USER, sessionId: 1, state: "active", keepAwakeAgeSeconds: 3600,
+  });
+
+  assert.match(hint, /3600s ago/);
+  assert.match(hint, /stopped/);
+});
+
+test("a fresh heartbeat just under the threshold is not flagged", () => {
+  const { hint } = describeReason({
+    reason: Reason.OK, user: USER, sessionId: 1, state: "active",
+    keepAwakeAgeSeconds: KEEP_AWAKE_STALE_SECONDS - 1,
+  });
+  assert.strictEqual(hint, undefined);
+});
+
+test("a disconnected session reports that first, since captures come back blank either way", () => {
+  const { hint } = describeReason({
+    reason: Reason.OK, user: USER, sessionId: 2, state: "disconnected", keepAwakeAgeSeconds: 5,
+  });
+  assert.match(hint, /disconnected/);
 });
 
 // ─── The probe as the health check sees it ───

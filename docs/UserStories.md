@@ -457,6 +457,23 @@
 
 ---
 
+### EPEA-TBD-15 — A machine inactivity limit locks the automation session `3 pts`
+
+**Description:** The VM applies "Interactive logon: Machine inactivity limit" at 900 seconds. It applies to every session, including the automation account's, and the per-user settings from EPEA-TBD-13 do not override it. Input cannot be sent to a locked desktop, so fifteen minutes after the last input every scheduled desktop run fails. It cannot be recovered either: the account's password is written to the LSA secret and discarded by design, so nothing holds a credential that could unlock the session, and only a reboot brings it back through autologon. Exempting the VM is the right fix and is somebody else's decision, so Marvin also ships a keep-alive.
+
+**Acceptance Criteria:**
+- [x] AC1: A keep-alive runs in the automation session and resets the idle timer, using a zero-distance mouse move so it cannot move the cursor during a test that is driving the mouse.
+- [x] AC2: It is registered as a logon-triggered scheduled task for that account, so autologon after any reboot restarts it with the session. Nothing is started by hand.
+- [x] AC3: The task's settings survive the cases the defaults break: no execution time limit, not stopped when the machine goes idle or on battery, and restarted if it fails.
+- [x] AC4: The keep-alive proves it is alive with a heartbeat. "The scheduled task exists" is never accepted as evidence that it is working.
+- [x] AC5: The Desktop Session check warns when the keep-alive is missing or stale **while the session still works**, since a warning that waits for the lock arrives after the session can no longer be recovered.
+- [x] AC6: A rejected input injection is logged rather than silently ignored, since that is what it looks like when the session locked anyway.
+- [x] AC7: Tested: no heartbeat warns, a stale heartbeat warns and says how long ago, a fresh one does not warn, and a disconnected session still reports that first.
+- [ ] AC8: Verified on the VM: the session is still unlocked more than an hour after boot with nobody connected, and a desktop schedule runs at 3am. *(Awaiting confirmation.)*
+- [ ] AC9: The policy owner has been told this account defeats the inactivity limit, or the VM has been exempted instead. *(Not a code change; recorded so it is not quietly skipped.)*
+
+---
+
 ## Secrets Management
 
 ### EPEA-2505 — User encrypted secrets store `8 pts`

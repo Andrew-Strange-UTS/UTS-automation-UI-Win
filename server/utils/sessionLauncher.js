@@ -40,6 +40,11 @@ const Reason = {
 
 const DEFAULT_PROBE_TIMEOUT_SECONDS = 30;
 
+// The keep-alive writes a heartbeat each cycle (default 4 minutes). Older than
+// this and it is not doing its job, whatever its scheduled task claims: a task
+// sits in "Running" perfectly happily with a wedged script behind it.
+const KEEP_AWAKE_STALE_SECONDS = 600;
+
 function defaultScriptPath() {
   return path.join(__dirname, "..", "runners", SCRIPT_NAME);
 }
@@ -144,13 +149,25 @@ function describeReason(result = {}) {
   const win32 = result.win32 ? ` (Win32 error ${result.win32})` : "";
 
   switch (result.reason) {
-    case Reason.OK:
-      return {
-        cause: `Session ${result.sessionId} (${result.state})`,
-        hint: result.state === "disconnected"
-          ? `${user} is logged on but its session is disconnected. Input works, but screen captures come back blank. Reconnect it to the console (tscon) so failure screenshots are usable.`
-          : undefined,
-      };
+    case Reason.OK: {
+      // A session that works right now can still be minutes away from locking,
+      // and a locked session cannot be unlocked: the account's password is
+      // discarded at setup by design. So say so while it is still fixable.
+      const age = result.keepAwakeAgeSeconds;
+      const keepAwakeStale = age === null || age === undefined || age > KEEP_AWAKE_STALE_SECONDS;
+
+      let hint;
+      if (result.state === "disconnected") {
+        hint = `${user} is logged on but its session is disconnected. Input works, but screen captures come back blank. Reconnect it to the console (tscon) so failure screenshots are usable.`;
+      } else if (keepAwakeStale) {
+        hint =
+          age === null || age === undefined
+            ? `The session works, but nothing is keeping it awake. If this VM has a machine inactivity limit, the session will lock and desktop schedules will start failing. Check the "Marvin keep automation session awake" scheduled task is running in ${user}'s session.`
+            : `The session works, but the keep-alive last reported ${age}s ago, so it has stopped. The session will lock once the machine inactivity limit fires. Check the "Marvin keep automation session awake" scheduled task in ${user}'s session.`;
+      }
+
+      return { cause: `Session ${result.sessionId} (${result.state})`, hint };
+    }
     case Reason.NOT_CONFIGURED:
       return {
         cause: "No automation account is set up",
@@ -352,6 +369,7 @@ function startRunInSession(options = {}) {
 
 module.exports = {
   Reason,
+  KEEP_AWAKE_STALE_SECONDS,
   startRunInSession,
   SCRIPT_NAME,
   defaultScriptPath,

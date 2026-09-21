@@ -41,7 +41,9 @@ param(
     # Wait for the launched process and exit with its code.
     [switch]$Wait,
 
-    [int]$TimeoutSeconds = 30
+    [int]$TimeoutSeconds = 30,
+
+    [string]$DataDir = "C:\ProgramData\uts-automation"
 )
 
 $ErrorActionPreference = "Stop"
@@ -354,7 +356,26 @@ exit 0
     }
 
     if ($outcome.exitCode -eq 0) {
-        Write-Result "ok" @{ user = $User; sessionId = $session.SessionId; state = $stateName }
+        # How long since the keep-alive last proved it was alive. A scheduled
+        # task can sit in "Running" with a wedged script behind it, so the
+        # heartbeat is what gets reported, not the task's state.
+        $keepAwakeAge = $null
+        $heartbeat = Join-Path $DataDir "tmp\keep-awake.heartbeat"
+        if (Test-Path $heartbeat) {
+            try {
+                $stamp = [datetime]::Parse((Get-Content $heartbeat -Raw).Trim())
+                $keepAwakeAge = [int]((Get-Date) - $stamp).TotalSeconds
+            } catch {
+                $keepAwakeAge = $null
+            }
+        }
+
+        Write-Result "ok" @{
+            user = $User
+            sessionId = $session.SessionId
+            state = $stateName
+            keepAwakeAgeSeconds = $keepAwakeAge
+        }
         exit 0
     }
 

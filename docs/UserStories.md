@@ -390,6 +390,56 @@
 
 ---
 
+### EPEA-TBD-11 — A broken data directory was hidden behind a green startup tick `8 pts`
+
+**Description:** For nearly two months `C:\ProgramData\uts-automation\schedules.json` carried the empty DACL left by the EPEA-TBD-10 bug, so the service could neither read nor write it. `loadSchedules()` caught the `EPERM` and returned `[]`, so the API reported zero schedules, the startup check went green, and two active schedules silently stopped running. The failure only surfaced when someone tried to add a schedule and the write threw, producing an HTML 500. The write path also has no ACL repair, unlike the master key read path.
+
+**Acceptance Criteria:**
+- [x] AC1: A read failure on the schedule store is never reported as an empty list. The store distinguishes "no schedules" from "cannot read schedules", and the error reaches the API response.
+- [x] AC2: An unreadable or unwritable `schedules.json` gets the same repair the master key gets (directory ACL, `takeown`, `/reset`), attempted once, then one retry. A repair that does not help is reported, not looped.
+- [x] AC3: The service's `/api/health` proves it can read the store and write to the data directory, and reports `degraded` rather than `ok` when it cannot, naming the failing path.
+- [ ] AC4: The app's startup check shows scheduling as unavailable, with the failing path and the elevated repair command, whenever the service reports degraded. A degraded service is never shown as a green tick. *(Backend half done and tested: `checkWithRecovery` returns `ok: false` with the service's hint. The rendering is existing code in `StartupChecks.jsx` and there is no renderer test harness, so this stays unchecked until seen on the VM.)*
+- [x] AC5: The write probe leaves no file behind and does not loosen the standard-user restriction from EPEA-TBD-6.
+- [x] AC6: Every schedules endpoint returns JSON on failure. An unexpected throw never reaches Express's default HTML error page.
+- [x] AC7: Tests over an injected fs: a read `EPERM` surfaces instead of returning `[]`; the repair runs once and does not loop; health reports degraded on a write failure. Includes a deliberate-break mode proving the check goes red.
+- [ ] AC8: Verified on the VM: with `schedules.json` locked, the startup check is red and names it; after repair it is green. *(Awaiting confirmation.)*
+
+---
+
+### EPEA-TBD-12 — "Scheduler service is not running" was reported for faults that were not that `5 pts`
+
+**Description:** One message in `routes/schedules.js` covers at least three unrelated failures: the service being unreachable, the service replying with something that is not JSON, and a local error while bundling secrets, test code or images before anything is sent. A permission error inside a service that had been healthy for 28 hours was reported as the service not running, with `reason: "will-not-start"` attached. The real cause was in a `detail` field the UI discards.
+
+**Acceptance Criteria:**
+- [x] AC1: The proxy claims the service is down only when the connection itself failed. A non-JSON or error reply is reported as an upstream error carrying the status and an excerpt of the body.
+- [x] AC2: A local bundling failure names the test or file that failed and is never reported as the service being down.
+- [ ] AC3: The create dialog shows `detail` and `hint`, not only `error`. *(Implemented in `SchedulePanel.jsx`. No renderer test harness exists, so unverified by test; confirm on the VM.)*
+- [x] AC4: `classifyFailure` maps the non-admin `Start-Service` output ("cannot open ... service on computer") to `permission-denied` instead of falling through to `will-not-start`.
+- [x] AC5: A start attempt is not made when the service answered the probe. A reachable service is never described as one that will not start.
+- [x] AC6: Tests: a stub upstream returning an HTML 500 produces an upstream-error response asserted on its message, not the service-down one; a bundling throw produces the bundling message.
+
+---
+
+### EPEA-TBD-13 — Scheduled desktop tests cannot reach a desktop `13 pts`
+
+**Description:** The scheduler service runs as LocalSystem, so it lives in Session 0, which has no interactive desktop. Every scheduled step inherits that session, so `SendKeys` fails with "Access is denied" and screen capture with "The handle is invalid", while the same sequence passes from Run Sequence in the user's own session. Scheduled web tests are unaffected: headless Chrome needs no desktop. Schedules must fire at 3am with nobody at the machine, so the fix is a dedicated local-only automation account that is always logged on, plus `CreateProcessAsUser` to launch runs into that account's session.
+
+**Note on credentials:** the service needs no password at run time. `WTSQueryUserToken` returns the token of an already logged-on session to LocalSystem without credentials. A password is required once, at install, and only by Winlogon, which cannot read Marvin's encrypted store. So the account password is generated at install, written to the LSA secret, and discarded: Marvin never stores it and no human ever sees it.
+
+**Acceptance Criteria:**
+- [ ] AC1: The service launches a desktop run into the automation account's interactive session (`WTSQueryUserToken` → `DuplicateTokenEx` → `CreateEnvironmentBlock` → `CreateProcessAsUser`, desktop `winsta0\default`), implemented as PowerShell P/Invoke with no native module.
+- [ ] AC2: The automation account is local only: not a domain account, denied network logon and denied Remote Desktop logon, and hidden from the sign-in screen's user list.
+- [ ] AC3: Nobody can sign in as that account. Its password is generated at install from a CSPRNG, written only to the LSA secret, never displayed, never written to disk and never placed in Marvin's secrets store.
+- [ ] AC4: The no-lock, no-screensaver and no-inactivity-timeout settings are applied to that account's profile alone (per-user settings, not the machine-wide inactivity policy) and provably do not change any other user's session on the VM.
+- [ ] AC5: Marvin's startup check shows a green tick only when a usable session for the automation account actually exists: present, unlocked and able to accept input. It proves this by launching a probe process into that session, not by inferring it from the account existing.
+- [ ] AC6: The startup check goes red with a named cause for each distinct failure: no session, session locked, wrong account logged on, and token acquisition denied.
+- [ ] AC7: A schedule with desktop steps that fires with no usable session fails with that reason, and notifies through the existing ntfy/Teams channels. A raw "Access is denied" never reaches the user.
+- [ ] AC8: Web-only schedules continue to run with no session requirement and no behaviour change.
+- [ ] AC9: Password recovery is documented as "reset the account and re-run the setup step", since no copy is kept anywhere.
+- [ ] AC10: Verified on the VM at 3am with nobody connected, including the deliberate failure case where the automation session is locked and the run is expected to fail loudly.
+
+---
+
 ## Secrets Management
 
 ### EPEA-2505 — User encrypted secrets store `8 pts`

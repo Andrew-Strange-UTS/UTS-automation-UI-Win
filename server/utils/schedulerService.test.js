@@ -34,6 +34,20 @@ test("classifies an elevation failure as permission-denied", () => {
   );
 });
 
+test("a standard user who cannot open the service is a permissions problem", () => {
+  // Non-admin Start-Service does not say "denied": Windows words it as
+  // "cannot open <name> service on computer '.'". That fell through to
+  // will-not-start and sent people to the Event Viewer for a service that was
+  // running perfectly well.
+  assert.strictEqual(
+    classifyFailure(
+      "Start-Service : Service 'Marvin Scheduler (marvinscheduler.exe)' cannot be started due to the " +
+        "following error: Cannot open marvinscheduler.exe service on computer '.'."
+    ),
+    Reason.PERMISSION_DENIED
+  );
+});
+
 test("classifies anything else as will-not-start", () => {
   assert.strictEqual(
     classifyFailure("The service did not respond to the start or control request in a timely fashion."),

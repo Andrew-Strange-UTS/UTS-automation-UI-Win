@@ -208,3 +208,136 @@ test("off Windows the probe says so instead of pretending", async () => {
   assert.strictEqual(result.reason, Reason.NOT_WINDOWS);
   assert.strictEqual(ran, false, "nothing is run off Windows");
 });
+
+// ─── A run driven through the session, as the scheduler sees it ───
+
+const { EventEmitter } = require("events");
+const { PassThrough } = require("stream");
+const { startRunInSession, buildRunScript, parseStartedPid } = require("./sessionLauncher");
+
+function fakePowerShell() {
+  const ps = new EventEmitter();
+  ps.stdout = new PassThrough();
+  ps.stderr = new PassThrough();
+  ps.kill = () => { ps.killed = true; };
+  return ps;
+}
+
+// A log file that grows, like the child's redirected output does.
+function fakeFs(initial = "") {
+  let content = initial;
+  const written = {};
+  return {
+    append: (text) => { content += text; },
+    written,
+    writeFileSync: (file, data) => { written[file] = data; },
+    statSync: () => ({ size: Buffer.byteLength(content) }),
+    openSync: () => 1,
+    closeSync: () => {},
+    readSync: (fd, buffer, off, length, position) => {
+      Buffer.from(content).copy(buffer, 0, position, position + length);
+      return length;
+    },
+  };
+}
+
+test("a run in the session streams the child's log back as stdout", async () => {
+  const files = fakeFs();
+  const ps = fakePowerShell();
+  const run = startRunInSession({
+    user: USER,
+    seqDir: "C:\\runs\\abc",
+    env: { NODE_PATH: "C:\\Marvin\\server\\node_modules" },
+    spawnFn: () => ps,
+    fsImpl: files,
+    pollMs: 5,
+  });
+
+  let received = "";
+  run.stdout.on("data", (c) => { received += c.toString(); });
+
+  files.append("Running step #1\n");
+  ps.stdout.write('{"reason":"started","pid":4242,"sessionId":1}\r\n');
+
+  const code = await new Promise((resolve) => {
+    setTimeout(() => {
+      files.append("All steps finished. 1 passed / 0 failed.\n");
+      ps.stdout.write('{"ok":true,"reason":"ok","pid":4242,"exitCode":0}\r\n');
+      ps.emit("close", 0);
+    }, 20);
+    run.on("close", resolve);
+  });
+
+  assert.strictEqual(code, 0);
+  assert.match(received, /Running step #1/);
+  assert.match(received, /All steps finished/, "output after the last poll is still flushed on close");
+  assert.strictEqual(run.pid, 4242, "the child's id is captured for Stop");
+});
+
+test("the run script carries the environment the user profile would not have", () => {
+  const files = fakeFs();
+  const ps = fakePowerShell();
+  startRunInSession({
+    user: USER,
+    seqDir: "C:\\runs\\abc",
+    env: { NODE_PATH: "C:\\Marvin\\server\\node_modules", SELENIUM_LOCAL: "true" },
+    spawnFn: () => ps,
+    fsImpl: files,
+  });
+  ps.emit("close", 0);
+
+  const cmd = files.written["C:\\runs\\abc\\run.cmd"] || files.written[Object.keys(files.written)[0]];
+  assert.match(cmd, /set "NODE_PATH=C:\\Marvin\\server\\node_modules"/);
+  assert.match(cmd, /set "SELENIUM_LOCAL=true"/);
+  assert.match(cmd, /exit \/b %ERRORLEVEL%/, "the exit code has to survive the wrapper");
+});
+
+test("a session that cannot run the job fails the run and says why", async () => {
+  // Not a test failure: the machine could not run the test. Those read very
+  // differently at 3am, so the run log has to say which one it was.
+  const files = fakeFs();
+  const ps = fakePowerShell();
+  const run = startRunInSession({
+    user: USER,
+    seqDir: "C:\\runs\\abc",
+    spawnFn: () => ps,
+    fsImpl: files,
+    pollMs: 5,
+  });
+
+  let errText = "";
+  run.stderr.on("data", (c) => { errText += c.toString(); });
+
+  const code = await new Promise((resolve) => {
+    run.on("close", resolve);
+    ps.stdout.write('{"ok":false,"reason":"locked","user":"marvin-auto","sessionId":1}\r\n');
+    ps.emit("close", 1);
+  });
+
+  assert.strictEqual(code, 1);
+  assert.match(errText, /Could not run in marvin-auto's session/);
+  assert.match(errText, /locked/);
+});
+
+test("stopping a run kills the process in the other session, not just powershell", () => {
+  // Our process tree does not reach into another session, so kill() alone
+  // would leave the test running with nobody watching it.
+  const files = fakeFs();
+  const ps = fakePowerShell();
+  const spawned = [];
+  const run = startRunInSession({
+    user: USER,
+    seqDir: "C:\\runs\\abc",
+    spawnFn: (cmd, args) => { spawned.push({ cmd, args }); return ps; },
+    fsImpl: files,
+  });
+
+  ps.stdout.write('{"reason":"started","pid":4242,"sessionId":1}\r\n');
+  run.kill();
+  ps.emit("close", 1);
+
+  const taskkill = spawned.find((s) => s.cmd === "taskkill");
+  assert.ok(taskkill, "taskkill is how a process in another session is stopped");
+  assert.deepStrictEqual(taskkill.args, ["/PID", "4242", "/T", "/F"]);
+  assert.ok(ps.killed, "and the launcher is stopped too");
+});

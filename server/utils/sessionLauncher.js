@@ -13,7 +13,10 @@
 //
 // The command runner is injectable so all of that can be tested off Windows.
 
-const { execFile } = require("child_process");
+const { execFile, spawn } = require("child_process");
+const { EventEmitter } = require("events");
+const { PassThrough } = require("stream");
+const fs = require("fs");
 const path = require("path");
 
 const SCRIPT_NAME = "launch-in-session.ps1";
@@ -82,6 +85,35 @@ function buildLaunchArgs({
 function buildRedirectedCommandLine({ exe = "node", args = [], logFile } = {}) {
   const quoted = [exe, ...args].map((part) => `"${part}"`).join(" ");
   return `cmd.exe /c ${quoted} > "${logFile}" 2>&1`;
+}
+
+// CreateProcessAsUser builds the child's environment from the user's own
+// profile, so the variables the service sets (NODE_PATH and friends) would be
+// lost. A .cmd in the run directory carries them, and is also the artefact you
+// can run by hand when a scheduled run misbehaves.
+function buildRunScript({ env = {}, exe = "node", args = [] } = {}) {
+  const lines = ["@echo off"];
+  for (const [name, value] of Object.entries(env)) {
+    if (value === undefined || value === null) continue;
+    lines.push(`set "${name}=${String(value)}"`);
+  }
+  lines.push(`"${exe}" ${args.map((a) => `"${a}"`).join(" ")}`);
+  lines.push("exit /b %ERRORLEVEL%");
+  return lines.join("\r\n") + "\r\n";
+}
+
+// launch -Wait reports the process id as soon as it has one, then the final
+// result when it exits. The id is what lets Stop kill a run that is executing
+// in another session, where our own process tree does not reach.
+function parseStartedPid(text) {
+  const match = String(text || "").match(/\{[^{}]*"reason"\s*:\s*"started"[^{}]*\}/);
+  if (!match) return null;
+  try {
+    const parsed = JSON.parse(match[0]);
+    return typeof parsed.pid === "number" ? parsed.pid : null;
+  } catch {
+    return null;
+  }
 }
 
 // The script prints one line of JSON, but PowerShell profiles, module banners
@@ -211,13 +243,123 @@ async function probeSession(options = {}) {
   return { ...parsed, ok: parsed.reason === Reason.OK, ...describeReason(parsed) };
 }
 
+// Start a scheduled run in the automation account's session, behaving like the
+// child_process the scheduler already knows how to drive: .stdout, .stderr,
+// "close", "error" and .kill().
+//
+// The output comes back through a file because a process in another session
+// cannot write down our pipes, and .kill() goes through taskkill because our
+// process tree does not reach into that session either.
+function startRunInSession(options = {}) {
+  const {
+    user,
+    seqDir,
+    env = {},
+    nodeExe = "node",
+    script = "run.js",
+    scriptPath = defaultScriptPath(),
+    spawnFn = spawn,
+    fsImpl = fs,
+    pollMs = 400,
+    timeoutSeconds,
+  } = options;
+
+  const emitter = new EventEmitter();
+  emitter.stdout = new PassThrough();
+  emitter.stderr = new PassThrough();
+
+  const runScript = path.join(seqDir, "run.cmd");
+  const logFile = path.join(seqDir, "run.log");
+  fsImpl.writeFileSync(runScript, buildRunScript({ env, exe: nodeExe, args: [script] }));
+
+  const args = buildLaunchArgs({
+    scriptPath,
+    user,
+    commandLine: buildRedirectedCommandLine({ exe: runScript, args: [], logFile }),
+    workingDirectory: seqDir,
+    wait: true,
+    timeoutSeconds,
+  });
+
+  let offset = 0;
+  const drain = () => {
+    try {
+      const size = fsImpl.statSync(logFile).size;
+      if (size <= offset) return;
+      const fd = fsImpl.openSync(logFile, "r");
+      try {
+        const buffer = Buffer.alloc(size - offset);
+        fsImpl.readSync(fd, buffer, 0, buffer.length, offset);
+        offset = size;
+        emitter.stdout.write(buffer);
+      } finally {
+        fsImpl.closeSync(fd);
+      }
+    } catch {
+      // The child has not created the log yet, or it is mid-write.
+    }
+  };
+
+  const ps = spawnFn("powershell.exe", args, { windowsHide: true });
+  const timer = setInterval(drain, pollMs);
+  // A poll timer must never be the reason a process stays alive: if the
+  // launcher dies without a close event, this would hold the service open.
+  if (typeof timer.unref === "function") timer.unref();
+  let childPid = null;
+  let scriptOutput = "";
+
+  ps.stdout.on("data", (chunk) => {
+    scriptOutput += chunk.toString();
+    if (childPid === null) {
+      const pid = parseStartedPid(scriptOutput);
+      if (pid !== null) {
+        childPid = pid;
+        emitter.pid = pid;
+      }
+    }
+  });
+  ps.stderr.on("data", (chunk) => emitter.stderr.write(chunk));
+  ps.on("error", (err) => {
+    clearInterval(timer);
+    emitter.emit("error", err);
+  });
+
+  ps.on("close", (code) => {
+    clearInterval(timer);
+    drain();
+
+    const result = parseResult(scriptOutput);
+    if (result && result.reason !== Reason.OK) {
+      // The run never started. Say why in the run log, or it reads as a test
+      // failure rather than a machine that could not run the test.
+      const { cause, hint } = describeReason({ ...result, user });
+      emitter.stderr.write(`Could not run in ${user}'s session: ${cause}\n${hint ? hint + "\n" : ""}`);
+      emitter.emit("close", 1);
+      return;
+    }
+    emitter.emit("close", code);
+  });
+
+  emitter.kill = () => {
+    if (childPid !== null) {
+      spawnFn("taskkill", ["/PID", String(childPid), "/T", "/F"], { windowsHide: true });
+    }
+    ps.kill();
+  };
+
+  return emitter;
+}
+
 module.exports = {
   Reason,
+  startRunInSession,
   SCRIPT_NAME,
   defaultScriptPath,
   buildProbeArgs,
   buildLaunchArgs,
   buildRedirectedCommandLine,
+  buildRunScript,
+  parseStartedPid,
   parseResult,
   describeReason,
   probeSession,

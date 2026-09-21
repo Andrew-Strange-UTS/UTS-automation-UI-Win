@@ -16,7 +16,7 @@ const { v4: uuidv4 } = require("uuid");
 const paths = require("./scheduler-service-paths");
 const { portableEncrypt, portableDecrypt } = require("./utils/portableEncryption");
 const { makeScheduleSecrets } = require("./utils/scheduleSecrets");
-const { applyDataDirAcl, repairFileAcl } = require("./utils/dataDirAcl");
+const { applyDataDirAcl, repairFileAcl, applyAutomationAccess } = require("./utils/dataDirAcl");
 const sessionLauncher = require("./utils/sessionLauncher");
 const {
   DataStoreError,
@@ -557,7 +557,33 @@ main();
     childEnv.SELENIUM_REMOTE_URL = process.env.SELENIUM_REMOTE_URL;
   }
 
-  const child = spawn("node", ["run.js"], { cwd: seqDir, env: childEnv });
+  // Desktop steps cannot run in Session 0, which is where everything this
+  // service spawns lands (EPEA-TBD-13). They need the automation account's
+  // interactive desktop. Web steps never cared: headless Chrome has no need of
+  // a desktop, which is why scheduled web tests worked all along.
+  const automation = isDesktop && process.platform === "win32" ? automationUser() : null;
+
+  if (isDesktop && process.platform === "win32" && !automation) {
+    // Failing loudly beats running it in Session 0, where every keystroke comes
+    // back as "Access is denied" and reads like a broken test rather than a
+    // machine that cannot run tests.
+    const message =
+      "No automation account is set up, so this desktop sequence has no interactive session to run in.\n" +
+      "Scheduled desktop tests need a dedicated always-logged-on account. Run the automation account setup on this machine.\n";
+    onLog(message);
+    setImmediate(() => onDone(1));
+    return null;
+  }
+
+  const child = automation
+    ? sessionLauncher.startRunInSession({
+        user: automation,
+        seqDir,
+        env: childEnv,
+        nodeExe: process.execPath,
+        script: "run.js",
+      })
+    : spawn("node", ["run.js"], { cwd: seqDir, env: childEnv });
 
   child.stdout.on("data", (chunk) => {
     const text = chunk.toString();
@@ -1145,6 +1171,26 @@ app.use((err, req, res, next) => {
   });
 });
 
+// The automation account runs scheduled desktop tests, so it needs to read the
+// runners, utils, builtins and test repo, and write its own run directory. Per
+// path, never the data directory itself: that holds the schedule store, the
+// encrypted secrets and the master key (EPEA-TBD-13 AC11).
+function grantAutomationAccess() {
+  if (process.platform !== "win32") return;
+  const user = automationUser();
+  if (!user) return;
+  try {
+    applyAutomationAccess(paths.DATA_DIR, user);
+    console.log(`[scheduler] Granted ${user} access to the run directories`);
+  } catch (err) {
+    console.error(
+      `[scheduler] Could not grant ${user} access to the run directories (${err.message}). ` +
+        "Scheduled desktop tests will fail until this is fixed."
+    );
+  }
+}
+
+grantAutomationAccess();
 migrateSecretsAtRest();
 restoreSchedules();
 

@@ -284,6 +284,9 @@ function Start-InSession {
         $result = @{ reason = "ok"; pid = $pi.dwProcessId }
 
         if ($WaitForExit) {
+            # Report the id before blocking, so a run in another session can be
+            # stopped: the service's own process tree does not reach into it.
+            Write-Output (@{ reason = "started"; pid = $pi.dwProcessId; sessionId = $SessionId } | ConvertTo-Json -Compress)
             $waited = [MarvinSession]::WaitForSingleObject($pi.hProcess, $TimeoutMs)
             if ($waited -eq $WAIT_TIMEOUT) {
                 $result.reason = "probe-timeout"

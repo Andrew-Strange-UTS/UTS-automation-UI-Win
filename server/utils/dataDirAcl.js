@@ -53,6 +53,40 @@ function fileAclRepairCommands(file) {
   };
 }
 
+/**
+ * Read access for the automation account, per path.
+ *
+ * A scheduled desktop run executes as that account (EPEA-TBD-13), so it has to
+ * read the shared runners, utils, builtins and test repo, and write its own
+ * per-run temp directory. It must NOT be granted the data directory itself:
+ * that is where schedules.json, secrets.json.enc and secrets_master_key live,
+ * and an inheritable grant at the root would hand it all three.
+ *
+ * No /T, for the same reason the directory hardening has none: an (OI)(CI)
+ * grant is invalid on a file, so recursing makes icacls fail on every existing
+ * child. The children were reset to inherit, so a grant on the directory
+ * reaches them.
+ */
+const AUTOMATION_READ_DIRS = ["runners", "utils", "builtins", "repo"];
+const AUTOMATION_WRITE_DIRS = ["tmp"];
+
+function automationAccessCommands(dataDir, account) {
+  const quoted = account.includes("\\") ? account : `.\\${account}`; // local account
+  const read = AUTOMATION_READ_DIRS.map(
+    (dir) => `icacls "${path.join(dataDir, dir)}" /grant "${quoted}:(OI)(CI)RX" /C /Q`
+  );
+  const write = AUTOMATION_WRITE_DIRS.map(
+    (dir) => `icacls "${path.join(dataDir, dir)}" /grant "${quoted}:(OI)(CI)M" /C /Q`
+  );
+  return [...read, ...write];
+}
+
+function applyAutomationAccess(dataDir, account, exec = execSync) {
+  for (const cmd of automationAccessCommands(dataDir, account)) {
+    run(cmd, exec);
+  }
+}
+
 function run(cmd, exec) {
   exec(cmd, { windowsHide: true, stdio: "ignore" });
 }
@@ -78,6 +112,10 @@ function repairFileAcl(file, exec = execSync) {
 }
 
 module.exports = {
+  AUTOMATION_READ_DIRS,
+  AUTOMATION_WRITE_DIRS,
+  automationAccessCommands,
+  applyAutomationAccess,
   dataDirAclCommands,
   fileAclRepairCommands,
   applyDataDirAcl,

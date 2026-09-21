@@ -31,6 +31,30 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# A scheduled task discards stdout and stderr, so an unlogged failure here is a
+# task that reports exit code 1 and nothing else. Log somewhere the service can
+# read, falling back to this user's own temp if the shared directory is not
+# writable, which is itself worth knowing.
+$logPath = Join-Path $DataDir "tmp\keep-awake.log"
+try {
+    $logDir = Split-Path $logPath -Parent
+    if (-not (Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Force | Out-Null }
+    Add-Content -Path $logPath -Value "" -ErrorAction Stop
+} catch {
+    $logPath = Join-Path $env:TEMP "marvin-keep-awake.log"
+}
+
+function Write-Log {
+    param([string]$Message)
+    $line = "$((Get-Date).ToString('o')) $Message"
+    Write-Output $line
+    try { Add-Content -Path $logPath -Value $line } catch { }
+}
+
+Write-Log "[keep-awake] starting as $env:USERNAME, interval ${IntervalSeconds}s, data dir $DataDir, log $logPath"
+
+try {
+
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
@@ -69,7 +93,7 @@ if (-not (Test-Path $heartbeatDir)) {
     New-Item -Path $heartbeatDir -ItemType Directory -Force | Out-Null
 }
 
-Write-Output "[keep-awake] Running as $env:USERNAME in session $((Get-Process -Id $PID).SessionId), every $IntervalSeconds s"
+Write-Log "[keep-awake] running in session $((Get-Process -Id $PID).SessionId)"
 
 while ($true) {
     # dx/dy of zero: input for the purposes of the idle timer, no cursor movement.
@@ -94,14 +118,23 @@ while ($true) {
         # Blocked input usually means the secure desktop has it, i.e. the
         # session locked anyway. Say so; a silent no-op here is how this would
         # look fine while doing nothing.
-        Write-Output "[keep-awake] SendInput was rejected (Win32 $([Runtime.InteropServices.Marshal]::GetLastWin32Error())). The session may be locked."
+        Write-Log "[keep-awake] SendInput was rejected (Win32 $([Runtime.InteropServices.Marshal]::GetLastWin32Error())). The session may be locked."
     } else {
         try {
             Set-Content -Path $heartbeat -Value (Get-Date).ToString("o") -Encoding ASCII
         } catch {
-            Write-Output "[keep-awake] Could not write the heartbeat: $($_.Exception.Message)"
+            Write-Log "[keep-awake] could not write the heartbeat: $($_.Exception.Message)"
         }
     }
 
     Start-Sleep -Seconds $IntervalSeconds
+}
+
+}
+catch {
+    # Exit code 1 with no explanation is what this looked like on the VM. Never
+    # again: whatever killed it goes in the log.
+    Write-Log "[keep-awake] FAILED: $($_.Exception.GetType().Name): $($_.Exception.Message)"
+    Write-Log "[keep-awake] $($_.ScriptStackTrace)"
+    exit 1
 }

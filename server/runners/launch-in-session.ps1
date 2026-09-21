@@ -38,6 +38,10 @@ param(
 
     [string]$WorkingDirectory,
 
+    # The executable to start. Passing this explicitly is not optional in
+    # practice: see the comment in probe mode.
+    [string]$ApplicationName,
+
     # Wait for the launched process and exit with its code.
     [switch]$Wait,
 
@@ -366,7 +370,17 @@ exit 0
 '@
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($childScript))
     $child = "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
-    $outcome = Start-InSession -SessionId $session.SessionId -Command $child -Directory $null -WaitForExit $true -TimeoutMs ($TimeoutSeconds * 1000)
+
+    # Both an explicit application name AND an explicit working directory, which
+    # is the only combination this works with. Measured with -Mode diagnose on
+    # the VM: application name alone, working directory alone, no desktop and no
+    # environment block all failed (123, and 3 for the directory on its own);
+    # the two together succeeded. A NULL working directory means "inherit the
+    # service's", and the service's is not somewhere the target user can be.
+    $powershellPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+    $system32 = Join-Path $env:SystemRoot "System32"
+    $outcome = Start-InSession -SessionId $session.SessionId -Command $child -Directory $system32 `
+        -WaitForExit $true -TimeoutMs ($TimeoutSeconds * 1000) -ApplicationName $powershellPath
 
     if ($outcome.reason -ne "ok") {
         Write-Result $outcome.reason @{ user = $User; sessionId = $session.SessionId; state = $stateName; win32 = $outcome.win32 }
@@ -479,7 +493,14 @@ if (-not $CommandLine) {
 }
 
 $timeoutMs = if ($Wait) { $TimeoutSeconds * 1000 } else { 0 }
-$outcome = Start-InSession -SessionId $session.SessionId -Command $CommandLine -Directory $WorkingDirectory -WaitForExit ([bool]$Wait) -TimeoutMs $timeoutMs
+
+# Same rule as the probe: never leave either of these to be inferred. A working
+# directory is required even when the caller does not care what it is.
+$launchDir = if ($WorkingDirectory) { $WorkingDirectory } else { Join-Path $env:SystemRoot "System32" }
+$launchApp = if ($ApplicationName) { $ApplicationName } else { Join-Path $env:SystemRoot "System32\cmd.exe" }
+
+$outcome = Start-InSession -SessionId $session.SessionId -Command $CommandLine -Directory $launchDir `
+    -WaitForExit ([bool]$Wait) -TimeoutMs $timeoutMs -ApplicationName $launchApp
 
 $extra = @{ user = $User; sessionId = $session.SessionId; state = $stateName }
 foreach ($key in $outcome.Keys) { if ($key -ne "reason") { $extra[$key] = $outcome[$key] } }

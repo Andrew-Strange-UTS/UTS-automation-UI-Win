@@ -49,6 +49,12 @@ function defaultScriptPath() {
   return path.join(__dirname, "..", "runners", SCRIPT_NAME);
 }
 
+// The redirected command line always starts with cmd.exe, so that is what
+// CreateProcessAsUser has to be told it is launching.
+function defaultShell(env = process.env) {
+  return path.join(env.SystemRoot || "C:\\Windows", "System32", "cmd.exe");
+}
+
 function powershellArgs(scriptPath, extra) {
   return [
     "-NoProfile",
@@ -82,10 +88,14 @@ function buildLaunchArgs({
   user,
   commandLine,
   workingDirectory,
+  // CreateProcessAsUser needs the executable named explicitly as well as a
+  // working directory; inferring either fails with ERROR_INVALID_NAME.
+  applicationName = defaultShell(),
   wait = true,
   timeoutSeconds,
 } = {}) {
   const extra = ["-Mode", "launch", "-User", user, "-CommandLine", commandLine];
+  if (applicationName) extra.push("-ApplicationName", applicationName);
   if (workingDirectory) extra.push("-WorkingDirectory", workingDirectory);
   if (wait) extra.push("-Wait");
   if (timeoutSeconds) extra.push("-TimeoutSeconds", String(timeoutSeconds));
@@ -449,6 +459,7 @@ module.exports = {
   buildLaunchArgs,
   buildRedirectedCommandLine,
   buildRunScript,
+  defaultShell,
   parseStartedPid,
   parseResult,
   describeReason,

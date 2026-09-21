@@ -37,6 +37,18 @@ test("the probe runs the script without a profile and without prompting", () => 
   assert.deepStrictEqual(args.slice(args.indexOf("-User"), args.indexOf("-User") + 2), ["-User", USER]);
 });
 
+test("a launch always names the executable, because inferring it fails on a real VM", () => {
+  // Measured with -Mode diagnose: CreateProcessAsUser returned ERROR_INVALID_NAME
+  // (123) for every variant except one that passed BOTH an explicit application
+  // name and an explicit working directory. Neither alone was enough.
+  const args = buildLaunchArgs({ scriptPath: SCRIPT, user: USER, commandLine: "x", workingDirectory: "C:\\runs\\abc" });
+
+  const appIndex = args.indexOf("-ApplicationName");
+  assert.notStrictEqual(appIndex, -1, "an application name is not optional");
+  assert.match(args[appIndex + 1], /cmd\.exe$/i, "the redirected command line runs through cmd.exe");
+  assert.ok(args.includes("-WorkingDirectory"), "and a working directory is not optional either");
+});
+
 test("a launch carries the command line, working directory and wait flag", () => {
   const args = buildLaunchArgs({
     scriptPath: SCRIPT,

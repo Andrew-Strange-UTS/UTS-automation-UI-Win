@@ -221,6 +221,22 @@ Covered by `server/utils/serviceScriptPath.test.js` (4 `node --test` cases). The
 `Set-Content -Encoding UTF8` in Windows PowerShell 5.1 writes `EF BB BF`, and `JSON.parse` throws on it, so `readAccountName` fell into its catch and returned null. The service then reported `not-configured` for an automation account that had been created correctly, with a file that looks perfectly normal in any editor. Fixed on both sides: the setup script writes with `UTF8Encoding($false)` via `WriteAllText`, and both `automationAccount.js` and `dataDirHealth.js` strip a leading BOM before parsing, so files already written that way are read correctly without anyone having to know this happened. Covered by a case in each of their test files.
 - `scripts/setup-automation-account.ps1`, `server/utils/automationAccount.js`, `server/utils/automationAccount.test.js`, `server/utils/dataDirHealth.js`, `server/utils/dataDirHealth.test.js`
 
+### EPEA-TBD-13 addendum — CreateProcessAsUser needed both an application name and a working directory
+With a session found and its token taken, every launch into it failed with `ERROR_INVALID_NAME` (123). That error covers several unrelated causes, so `launch-in-session.ps1` gained a `diagnose` mode that varies one input at a time through `Start-InSession`, the same function production uses, and reports each Win32 result. Run on the VM through `GET /api/diagnose/session` (the diagnostic cannot be run from a prompt: `WTSQueryUserToken` needs `SeTcbPrivilege`, which LocalSystem has and an interactive administrator does not), it gave:
+
+| Variant | Result |
+|---|---|
+| as production (app=null, desktop set, env block, new console) | 123 |
+| explicit application name | 123 |
+| no desktop (inherit) | 123 |
+| no environment block | 123 |
+| working directory System32 | 3 |
+| CREATE_NO_WINDOW instead of CREATE_NEW_CONSOLE | 123 |
+| **explicit application name + System32 working directory** | **ok** |
+
+So neither alone is sufficient and both together work: a NULL `lpCurrentDirectory` inherits the service's own, which the target user cannot be in. Probe mode now passes the full path to `powershell.exe` and `System32`; launch mode requires both too, defaulting the executable to `cmd.exe` (the redirected command line always starts with it) and the directory to `System32` when the caller gives none. `buildLaunchArgs` passes `-ApplicationName` always, asserted by a test that records why.
+- `server/runners/launch-in-session.ps1`, `server/utils/sessionLauncher.js`, `server/utils/sessionLauncher.test.js`, `server/scheduler-service.js`
+
 ### EPEA-TBD-15 — A machine inactivity limit locks the automation session
 `server/runners/keep-session-awake.ps1` injects a **zero-distance** mouse move (`SendInput`, `dx=0, dy=0`, `MOUSEEVENTF_MOVE`) every four minutes. Windows counts it as input and resets the idle timer, but the cursor does not move, so it cannot disturb a test that is driving the mouse at that moment; a one-pixel jiggle would, and would produce flaky failures that look like bad tests. A rejected injection is logged rather than ignored, because that is what it looks like when the session locked anyway.
 

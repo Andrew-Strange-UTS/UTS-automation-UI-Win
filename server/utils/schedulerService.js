@@ -7,6 +7,7 @@
 
 const { exec } = require("child_process");
 const os = require("os");
+const { describeKeepAwake } = require("./sessionLauncher");
 
 const SCHEDULER_URL = process.env.UTS_SCHEDULER_URL || "http://localhost:5050";
 
@@ -219,6 +220,11 @@ async function checkWithRecovery() {
       // Only the service can check this: querying a session token is
       // LocalSystem's privilege, and the per-user backend has none.
       desktopSession: first.data.desktopSession,
+      // Reported separately: the keep-alive fails on its own, and the session
+      // looks perfectly healthy right up until the lock it was preventing.
+      keepAwake: first.data.desktopSession
+        ? describeKeepAwake(first.data.desktopSession)
+        : undefined,
     };
   }
 

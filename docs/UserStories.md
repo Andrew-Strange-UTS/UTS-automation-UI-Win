@@ -466,7 +466,8 @@
 - [x] AC2: It is registered as a logon-triggered scheduled task for that account, so autologon after any reboot restarts it with the session. Nothing is started by hand.
 - [x] AC3: The task's settings survive the cases the defaults break: no execution time limit, not stopped when the machine goes idle or on battery, and restarted if it fails.
 - [x] AC4: The keep-alive proves it is alive with a heartbeat. "The scheduled task exists" is never accepted as evidence that it is working.
-- [x] AC5: The Desktop Session check warns when the keep-alive is missing or stale **while the session still works**, since a warning that waits for the lock arrives after the session can no longer be recovered.
+- [x] AC5: The keep-alive has its **own startup check row**, not a footnote on the session's. It fails on its own, and when it does the session still looks healthy right up until it locks. The row reports while the session still works, since a warning that waits for the lock arrives after the session can no longer be recovered.
+- [x] AC10: On a machine with no inactivity limit the row reports "not needed" rather than failing, because nothing is going to lock that session and a red row would be a lie.
 - [x] AC6: A rejected input injection is logged rather than silently ignored, since that is what it looks like when the session locked anyway.
 - [x] AC7: Tested: no heartbeat warns, a stale heartbeat warns and says how long ago, a fresh one does not warn, and a disconnected session still reports that first.
 - [ ] AC8: Verified on the VM: the session is still unlocked more than an hour after boot with nobody connected, and a desktop schedule runs at 3am. *(Awaiting confirmation.)*

@@ -149,25 +149,13 @@ function describeReason(result = {}) {
   const win32 = result.win32 ? ` (Win32 error ${result.win32})` : "";
 
   switch (result.reason) {
-    case Reason.OK: {
-      // A session that works right now can still be minutes away from locking,
-      // and a locked session cannot be unlocked: the account's password is
-      // discarded at setup by design. So say so while it is still fixable.
-      const age = result.keepAwakeAgeSeconds;
-      const keepAwakeStale = age === null || age === undefined || age > KEEP_AWAKE_STALE_SECONDS;
-
-      let hint;
-      if (result.state === "disconnected") {
-        hint = `${user} is logged on but its session is disconnected. Input works, but screen captures come back blank. Reconnect it to the console (tscon) so failure screenshots are usable.`;
-      } else if (keepAwakeStale) {
-        hint =
-          age === null || age === undefined
-            ? `The session works, but nothing is keeping it awake. If this VM has a machine inactivity limit, the session will lock and desktop schedules will start failing. Check the "Marvin keep automation session awake" scheduled task is running in ${user}'s session.`
-            : `The session works, but the keep-alive last reported ${age}s ago, so it has stopped. The session will lock once the machine inactivity limit fires. Check the "Marvin keep automation session awake" scheduled task in ${user}'s session.`;
-      }
-
-      return { cause: `Session ${result.sessionId} (${result.state})`, hint };
-    }
+    case Reason.OK:
+      return {
+        cause: `Session ${result.sessionId} (${result.state})`,
+        hint: result.state === "disconnected"
+          ? `${user} is logged on but its session is disconnected. Input works, but screen captures come back blank. Reconnect it to the console (tscon) so failure screenshots are usable.`
+          : undefined,
+      };
     case Reason.NOT_CONFIGURED:
       return {
         cause: "No automation account is set up",
@@ -211,6 +199,47 @@ function describeReason(result = {}) {
         hint: "Run server\\runners\\launch-in-session.ps1 -Mode probe -User <account> by hand to see what it reports.",
       };
   }
+}
+
+// The keep-alive's own verdict, separate from the session's.
+//
+// It fails independently: the session can be perfectly healthy while the thing
+// stopping it from locking has been dead for an hour. And whether it is needed
+// at all depends on the machine's inactivity policy, so a missing keep-alive on
+// a VM with no such policy is not a fault and is not reported as one.
+//
+// The heartbeat decides, never the scheduled task's state: a task sits in
+// "Running" quite happily with a wedged script behind it.
+function describeKeepAwake(result = {}) {
+  const user = result.user || "the automation account";
+  const limit = Number(result.inactivityTimeoutSecs) || 0;
+  const age = result.keepAwakeAgeSeconds;
+  const alive = typeof age === "number" && age <= KEEP_AWAKE_STALE_SECONDS;
+  const TASK = '"Marvin keep automation session awake"';
+
+  if (!limit) {
+    return alive
+      ? { ok: true, cause: `Running (no inactivity limit on this machine)` }
+      : { ok: true, cause: "Not needed: this machine has no inactivity limit" };
+  }
+
+  if (alive) {
+    return { ok: true, cause: `Running, last beat ${age}s ago (limit ${limit}s)` };
+  }
+
+  if (typeof age !== "number") {
+    return {
+      ok: false,
+      cause: `Not running, and this machine locks a session after ${limit}s`,
+      hint: `${user}'s session will lock, and a locked session cannot be unlocked: the account's password is discarded at setup by design, so only a reboot recovers it. Check the ${TASK} scheduled task has run in that session.`,
+    };
+  }
+
+  return {
+    ok: false,
+    cause: `Stopped ${age}s ago, and this machine locks a session after ${limit}s`,
+    hint: `The keep-alive is registered but is no longer reporting, so the session will lock once the limit fires. Check the ${TASK} scheduled task in ${user}'s session; a task can sit in "Running" with a stalled script behind it.`,
+  };
 }
 
 function runPowerShell(args, timeoutMs) {
@@ -380,5 +409,6 @@ module.exports = {
   parseStartedPid,
   parseResult,
   describeReason,
+  describeKeepAwake,
   probeSession,
 };

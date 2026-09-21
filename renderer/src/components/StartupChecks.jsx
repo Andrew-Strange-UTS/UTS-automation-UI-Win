@@ -127,6 +127,17 @@ export default function StartupChecks({ onDismiss }) {
       required: false,
       feature: "Scheduled desktop tests",
     },
+    {
+      // Separate from the session row: this fails on its own, and when it does
+      // the session still looks healthy right up until it locks. A locked
+      // session cannot be unlocked, so this has to be visible beforehand.
+      label: "Session Keep-Alive",
+      check: checks.sessionKeepAwake || { ok: false, detail: "Not checked" },
+      info: (checks.sessionKeepAwake || {}).detail,
+      warn: !isWindows,
+      required: false,
+      feature: "Desktop schedules that keep working",
+    },
   ];
 
   const allCriticalOk = checks.node.ok && checks.os.ok;

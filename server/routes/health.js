@@ -161,12 +161,36 @@ router.get("/", async (req, res) => {
     };
   }
 
+  // --- Session keep-alive (EPEA-TBD-15) ---
+  // Its own row, because it fails on its own: the session can be healthy while
+  // the only thing stopping it from locking has been dead for an hour. On a
+  // machine with no inactivity limit it reports as not needed rather than
+  // failing, which would be a lie.
+  if (!isWindows || !checks.desktopSession.ok) {
+    checks.sessionKeepAwake = {
+      ok: false,
+      detail: !isWindows
+        ? "Only applies to scheduled desktop tests on Windows."
+        : "Unknown: there is no usable automation session to check.",
+    };
+  } else {
+    const keepAwake = checks.scheduler.keepAwake || {};
+    checks.sessionKeepAwake = {
+      ok: Boolean(keepAwake.ok),
+      version: keepAwake.ok ? keepAwake.cause : undefined,
+      detail: keepAwake.cause || "The keep-alive could not be checked.",
+      hint: keepAwake.hint,
+    };
+  }
+
   // --- Summary: what features are available ---
   const features = {
     webTests: checks.chrome.ok,
     desktopTests: isWindows && checks.powershell.ok,
     scheduling: checks.scheduler.ok,
     desktopSchedules: isWindows && checks.scheduler.ok && checks.desktopSession.ok,
+    // Available now, but not for long if the session is about to lock.
+    desktopSchedulesStayAvailable: isWindows && checks.desktopSession.ok && checks.sessionKeepAwake.ok,
     gitClone: checks.git.ok,
     zephyrReporting: true, // Always available if secrets are configured
   };

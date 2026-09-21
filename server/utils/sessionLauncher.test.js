@@ -16,6 +16,7 @@ const {
   buildRedirectedCommandLine,
   parseResult,
   describeReason,
+  describeKeepAwake,
   probeSession,
 } = require("./sessionLauncher");
 
@@ -130,44 +131,52 @@ test("a disconnected but working session is reported green, with the screenshot 
   assert.match(hint, /blank|tscon/i, "disconnected sessions render nothing, so captures come back blank");
 });
 
-test("a healthy active session with the keep-alive running carries no warning", () => {
-  const { hint } = describeReason({
-    reason: Reason.OK, user: USER, sessionId: 1, state: "active", keepAwakeAgeSeconds: 12,
-  });
+test("a healthy active session carries no warning of its own", () => {
+  const { hint } = describeReason({ reason: Reason.OK, user: USER, sessionId: 1, state: "active" });
   assert.strictEqual(hint, undefined);
 });
 
-test("a session with nothing keeping it awake is flagged while it still works", () => {
-  // A session that is fine right now can be minutes from locking, and a locked
-  // session cannot be unlocked: the password is discarded at setup by design.
-  // Saying so only once it has locked is too late to be useful.
-  const { cause, hint } = describeReason({
-    reason: Reason.OK, user: USER, sessionId: 1, state: "active",
-  });
+// ─── The keep-alive's own verdict ───
 
-  assert.match(cause, /Session 1/, "it is still reported as a working session");
-  assert.match(hint, /nothing is keeping it awake/);
-  assert.match(hint, /inactivity limit/);
+test("a live keep-alive passes and says when it last reported", () => {
+  const { ok, cause } = describeKeepAwake({ user: USER, keepAwakeAgeSeconds: 12, inactivityTimeoutSecs: 900 });
+  assert.strictEqual(ok, true);
+  assert.match(cause, /last beat 12s ago/);
+  assert.match(cause, /limit 900s/, "the limit it is defending against is worth showing");
 });
 
-test("a keep-alive that has stopped reporting is flagged, with how long ago", () => {
-  const { hint } = describeReason({
-    reason: Reason.OK, user: USER, sessionId: 1, state: "active", keepAwakeAgeSeconds: 3600,
-  });
-
-  assert.match(hint, /3600s ago/);
-  assert.match(hint, /stopped/);
+test("no keep-alive on a machine with a lock policy fails, while the session still works", () => {
+  // The session is fine right now and minutes from locking. A locked session
+  // cannot be unlocked: the password is discarded at setup by design. Saying so
+  // only once it has locked is too late to act on.
+  const { ok, cause, hint } = describeKeepAwake({ user: USER, inactivityTimeoutSecs: 900 });
+  assert.strictEqual(ok, false);
+  assert.match(cause, /Not running/);
+  assert.match(cause, /900s/);
+  assert.match(hint, /cannot be unlocked/);
 });
 
-test("a fresh heartbeat just under the threshold is not flagged", () => {
-  const { hint } = describeReason({
-    reason: Reason.OK, user: USER, sessionId: 1, state: "active",
-    keepAwakeAgeSeconds: KEEP_AWAKE_STALE_SECONDS - 1,
-  });
-  assert.strictEqual(hint, undefined);
+test("a keep-alive that stopped reporting fails, and says how long ago", () => {
+  const { ok, cause, hint } = describeKeepAwake({ user: USER, keepAwakeAgeSeconds: 3600, inactivityTimeoutSecs: 900 });
+  assert.strictEqual(ok, false);
+  assert.match(cause, /Stopped 3600s ago/);
+  assert.match(hint, /can sit in "Running" with a stalled script/);
 });
 
-test("a disconnected session reports that first, since captures come back blank either way", () => {
+test("a machine with no inactivity limit does not need one, and is not marked broken", () => {
+  // A red row here would be a lie: nothing is going to lock that session.
+  const { ok, cause } = describeKeepAwake({ user: USER, inactivityTimeoutSecs: 0 });
+  assert.strictEqual(ok, true);
+  assert.match(cause, /Not needed/);
+});
+
+test("the staleness threshold is a boundary, not a suggestion", () => {
+  const limit = { user: USER, inactivityTimeoutSecs: 900 };
+  assert.strictEqual(describeKeepAwake({ ...limit, keepAwakeAgeSeconds: KEEP_AWAKE_STALE_SECONDS }).ok, true);
+  assert.strictEqual(describeKeepAwake({ ...limit, keepAwakeAgeSeconds: KEEP_AWAKE_STALE_SECONDS + 1 }).ok, false);
+});
+
+test("a disconnected session still reports the blank-capture caveat", () => {
   const { hint } = describeReason({
     reason: Reason.OK, user: USER, sessionId: 2, state: "disconnected", keepAwakeAgeSeconds: 5,
   });

@@ -370,11 +370,22 @@ exit 0
             }
         }
 
+        # Whether a keep-alive is needed at all depends on this policy. Without
+        # it, a missing keep-alive is not a fault and must not be shown as one.
+        $inactivityLimit = 0
+        try {
+            $value = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "InactivityTimeoutSecs" -ErrorAction SilentlyContinue).InactivityTimeoutSecs
+            if ($value) { $inactivityLimit = [int]$value }
+        } catch {
+            $inactivityLimit = 0
+        }
+
         Write-Result "ok" @{
             user = $User
             sessionId = $session.SessionId
             state = $stateName
             keepAwakeAgeSeconds = $keepAwakeAge
+            inactivityTimeoutSecs = $inactivityLimit
         }
         exit 0
     }

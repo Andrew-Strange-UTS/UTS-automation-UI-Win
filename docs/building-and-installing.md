@@ -67,7 +67,7 @@ npm run dist
 ### Output
 
 The installer is written to `dist/Marvin Setup <version>.exe` (for example
-`dist/Marvin Setup 1.0.0.exe`).
+`dist/Marvin Setup 1.1.0.exe`).
 
 To produce a `marvin-setup-<version>.exe` filename instead, add an `artifactName`
 to the `nsis` block in `package.json`. The current block, with that line added,

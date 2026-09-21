@@ -237,6 +237,12 @@ With a session found and its token taken, every launch into it failed with `ERRO
 So neither alone is sufficient and both together work: a NULL `lpCurrentDirectory` inherits the service's own, which the target user cannot be in. Probe mode now passes the full path to `powershell.exe` and `System32`; launch mode requires both too, defaulting the executable to `cmd.exe` (the redirected command line always starts with it) and the directory to `System32` when the caller gives none. `buildLaunchArgs` passes `-ApplicationName` always, asserted by a test that records why.
 - `server/runners/launch-in-session.ps1`, `server/utils/sessionLauncher.js`, `server/utils/sessionLauncher.test.js`, `server/scheduler-service.js`
 
+### EPEA-TBD-13 addendum — cmd /c ate the redirect, so a scheduled run failed with an empty log
+The first scheduled desktop run in the session failed with exit code 1 and a log containing nothing but the service's own "finished with code 1" line. `cmd /c` strips the first and last quote of everything after the switch whenever the string holds more than two quotes, so `cmd.exe /c "run.cmd" > "run.log" 2>&1` reached cmd as `run.cmd" > "run.log 2>&1`: the redirect never happened, nothing was captured, and cmd exited 1. The whole command is now wrapped in one more pair of quotes, giving cmd an outer pair to strip and leaving the real ones intact, with the rule written out next to the code and asserted by a test that reconstructs what cmd sees.
+
+`startRunInSession` also now notices when not one byte reached the log and says so, naming the log path and quoting whatever the launcher reported. An empty log plus an exit code is the least useful thing a scheduled run can hand back.
+- `server/utils/sessionLauncher.js`, `server/utils/sessionLauncher.test.js`
+
 ### EPEA-TBD-15 — A machine inactivity limit locks the automation session
 `server/runners/keep-session-awake.ps1` injects a **zero-distance** mouse move (`SendInput`, `dx=0, dy=0`, `MOUSEEVENTF_MOVE`) every four minutes. Windows counts it as input and resets the idle timer, but the cursor does not move, so it cannot disturb a test that is driving the mouse at that moment; a one-pixel jiggle would, and would produce flaky failures that look like bad tests. A rejected injection is logged rather than ignored, because that is what it looks like when the session locked anyway.
 

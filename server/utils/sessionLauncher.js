@@ -105,9 +105,18 @@ function buildLaunchArgs({
 // A process created in another session cannot write down our stdio pipes, so
 // the child redirects to a file and the caller tails it. cmd.exe does the
 // redirection because CreateProcessAsUser takes a command line, not a shell.
+//
+// The outer quotes are not redundant. `cmd /c` strips the first and last quote
+// of everything after /c whenever the string holds more than two quotes, so
+//     cmd /c "run.cmd" > "run.log" 2>&1
+// reaches cmd as
+//     run.cmd" > "run.log 2>&1
+// The redirect never happens, nothing is captured, and cmd exits 1: a scheduled
+// run that failed with an empty log. Wrapping the whole thing gives cmd an
+// outer pair to strip and leaves the real quotes intact.
 function buildRedirectedCommandLine({ exe = "node", args = [], logFile } = {}) {
   const quoted = [exe, ...args].map((part) => `"${part}"`).join(" ");
-  return `cmd.exe /c ${quoted} > "${logFile}" 2>&1`;
+  return `cmd.exe /c "${quoted} > "${logFile}" 2>&1"`;
 }
 
 // CreateProcessAsUser builds the child's environment from the user's own
@@ -391,6 +400,15 @@ function startRunInSession(options = {}) {
   ps.on("close", (code) => {
     clearInterval(timer);
     drain();
+
+    if (offset === 0) {
+      // No bytes ever reached the log. The test cannot have run, so say that
+      // rather than handing back an empty log and an exit code.
+      emitter.stderr.write(
+        `No output was captured from this run. The command was never able to write to ${logFile}, ` +
+          `which usually means it did not start. Launcher said: ${scriptOutput.trim() || "(nothing)"}\n`
+      );
+    }
 
     const result = parseResult(scriptOutput);
     if (result && result.reason !== Reason.OK) {

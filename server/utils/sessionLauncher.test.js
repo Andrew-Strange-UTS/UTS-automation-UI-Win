@@ -80,7 +80,42 @@ test("the child redirects its own output, because it cannot share our pipes", ()
 
   assert.match(line, /^cmd\.exe \/c /);
   assert.match(line, /"node" "run\.js"/);
-  assert.match(line, />\s*"C:\\ProgramData\\uts-automation\\tmp\\scheduled-abc\\run\.log" 2>&1$/);
+  assert.match(line, />\s*"C:\\ProgramData\\uts-automation\\tmp\\scheduled-abc\\run\.log" 2>&1"$/);
+});
+
+test("the whole command is wrapped, because cmd /c eats the outer quotes", () => {
+  // Without the wrapper, cmd strips the first and last quote of everything
+  // after /c, the redirect is mangled, nothing is captured, and cmd exits 1.
+  // That is a scheduled run that failed with an empty log and no explanation.
+  const line = buildRedirectedCommandLine({ exe: "node", args: ["run.js"], logFile: "C:\\runs\\out.log" });
+
+  const afterSwitch = line.slice("cmd.exe /c ".length);
+  assert.ok(afterSwitch.startsWith('"'), "must open with a quote for cmd to strip");
+  assert.ok(afterSwitch.endsWith('"'), "and close with one");
+
+  // What cmd actually executes after stripping that outer pair.
+  const asCmdSeesIt = afterSwitch.slice(1, -1);
+  assert.strictEqual(asCmdSeesIt, '"node" "run.js" > "C:\\runs\\out.log" 2>&1');
+});
+
+test("a run that captured nothing says so instead of returning an empty log", async () => {
+  const files = fakeFs();
+  const ps = fakePowerShell();
+  const run = startRunInSession({
+    user: USER, seqDir: "C:\\runs\\abc", spawnFn: () => ps, fsImpl: files, pollMs: 5,
+  });
+
+  let errText = "";
+  run.stderr.on("data", (c) => { errText += c.toString(); });
+
+  await new Promise((resolve) => {
+    run.on("close", resolve);
+    ps.stdout.write('{"ok":true,"reason":"ok","pid":42,"exitCode":1}\r\n');
+    ps.emit("close", 1);
+  });
+
+  assert.match(errText, /No output was captured/);
+  assert.match(errText, /did not start/);
 });
 
 test("paths with spaces stay quoted", () => {

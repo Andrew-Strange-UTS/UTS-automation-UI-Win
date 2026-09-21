@@ -468,6 +468,56 @@ because Windows grants Users read and execute there. A clone under
 `C:\Users\<someone>` is not, and no amount of configuration will make it
 work.
 
+### If the VM has a machine-wide inactivity limit
+
+The setup script warns when it finds one:
+
+```
+WARNING: the machine-wide inactivity limit is set to 900 seconds. It will lock
+the automation session too, and scheduled desktop tests will fail once it fires.
+```
+
+This is the **"Interactive logon: Machine inactivity limit"** security setting,
+stored at
+`HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\InactivityTimeoutSecs`.
+It applies to every session on the machine, including the automation account's,
+and the per-user settings the setup script writes do not override it. Fifteen
+minutes of no input and the session locks.
+
+A locked desktop cannot be sent input, so every scheduled desktop run after that
+point fails. It is also **unrecoverable without a reboot**: the account's
+password is written to the LSA secret and discarded, by design, so nothing
+holds a credential that could unlock the session. Autologon on the next boot is
+the only way back in.
+
+Check what is set, and whether it is local or pushed by policy:
+
+```powershell
+Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name InactivityTimeoutSecs
+gpresult /scope computer /r
+```
+
+If a domain GPO applies it, clearing it locally is undone at the next policy
+refresh (usually within 90 minutes), so it has to be fixed centrally.
+
+In order of preference:
+
+1. **Have the VM exempted** from that policy: its own OU, a WMI filter, or a
+   scoped policy that sets the limit to `0`. This is the correct fix. The VM
+   runs no interactive human sessions except administration, and the automation
+   account cannot be signed into by a person: it is denied network and Remote
+   Desktop logon, hidden from the sign-in screen, and nobody knows its password.
+2. **A sanctioned keep-alive** in the automation session, which resets the idle
+   timer so the limit never fires. This weakens the control for that session,
+   so agree it with whoever owns the policy rather than doing it quietly.
+3. **A reboot scheduled shortly before the run.** Autologon produces a fresh,
+   unlocked session, and the limit only fires after the idle period. This is
+   fragile (a run starting more than the limit after boot is back to square one)
+   and is a stopgap, not a fix.
+
+Until one of those is in place, **scheduled web tests still work normally**.
+Only desktop schedules depend on the session.
+
 ### Verify the install
 
 Log in as a **second, non-administrator user** (this is the real test of a

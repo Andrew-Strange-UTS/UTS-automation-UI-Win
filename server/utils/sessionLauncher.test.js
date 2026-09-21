@@ -507,3 +507,46 @@ test("a diagnostic that cannot run says so rather than reporting nothing wrong",
   assert.strictEqual(result.reason, Reason.UNREADABLE);
   assert.match(result.detail, /Access is denied/);
 });
+
+// ─── The environment handed to a run in another session ───
+
+const { stripUserEnvironment } = require("./sessionLauncher");
+
+test("the service's own identity is kept out of the run's environment", () => {
+  // The service is LocalSystem, so its TEMP is C:\Windows\TEMP, which grants
+  // Users write but not read. Replaying it into the child broke Add-Type:
+  // csc wrote its .cs there and could not read it back.
+  const kept = stripUserEnvironment({
+    TEMP: "C:\\Windows\\TEMP",
+    TMP: "C:\\Windows\\TEMP",
+    USERPROFILE: "C:\\Windows\\system32\\config\\systemprofile",
+    APPDATA: "C:\\Windows\\system32\\config\\systemprofile\\AppData\\Roaming",
+    USERNAME: "PRDITDJUMP02$",
+    NODE_PATH: "C:\\Program Files\\Marvin\\resources\\app\\server\\node_modules",
+    SELENIUM_LOCAL: "true",
+  });
+
+  assert.deepStrictEqual(Object.keys(kept).sort(), ["NODE_PATH", "SELENIUM_LOCAL"]);
+});
+
+test("the filter is case insensitive, because Windows variables are", () => {
+  const kept = stripUserEnvironment({ Temp: "x", tmp: "y", UserProfile: "z", NODE_PATH: "keep" });
+  assert.deepStrictEqual(Object.keys(kept), ["NODE_PATH"]);
+});
+
+test("a run script carries what the run needs and nothing about who runs it", () => {
+  const files = fakeFs();
+  const ps = fakePowerShell();
+  startRunInSession({
+    user: USER,
+    seqDir: "C:\\runs\\abc",
+    env: { NODE_PATH: "C:\\Marvin\\node_modules", TEMP: "C:\\Windows\\TEMP" },
+    spawnFn: () => ps,
+    fsImpl: files,
+  });
+  ps.emit("close", 0);
+
+  const cmd = files.written[Object.keys(files.written)[0]];
+  assert.match(cmd, /set "NODE_PATH=/);
+  assert.ok(!/set "TEMP=/i.test(cmd), "the user's own TEMP must survive");
+});

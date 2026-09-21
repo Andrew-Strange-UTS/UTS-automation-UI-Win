@@ -123,6 +123,36 @@ function buildRedirectedCommandLine({ exe = "node", args = [], logFile } = {}) {
   return `cmd.exe /c "${quoted} > "${logFile}" 2>&1"`;
 }
 
+// Variables that describe WHO is running, not WHAT is being run. The service
+// runs as LocalSystem, so its copies point into the SYSTEM profile: TEMP is
+// C:\Windows\TEMP, which grants Users write but not read. Replaying those into
+// the child overrides the correct per-user values CreateEnvironmentBlock
+// already set, and the first thing that breaks is Add-Type: csc writes its .cs
+// there and then cannot read it back ("Source file ... could not be found").
+const USER_SPECIFIC_ENV = [
+  "TEMP",
+  "TMP",
+  "USERPROFILE",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "USERNAME",
+  "USERDOMAIN",
+  "USERDOMAIN_ROAMINGPROFILE",
+  "LOGONSERVER",
+  "SESSIONNAME",
+];
+
+function stripUserEnvironment(env = {}) {
+  const drop = new Set(USER_SPECIFIC_ENV.map((name) => name.toUpperCase()));
+  const kept = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (!drop.has(name.toUpperCase())) kept[name] = value;
+  }
+  return kept;
+}
+
 // CreateProcessAsUser builds the child's environment from the user's own
 // profile, so the variables the service sets (NODE_PATH and friends) would be
 // lost. A .cmd in the run directory carries them, and is also the artefact you
@@ -352,7 +382,12 @@ function startRunInSession(options = {}) {
 
   const runScript = path.join(seqDir, "run.cmd");
   const logFile = path.join(seqDir, "run.log");
-  fsImpl.writeFileSync(runScript, buildRunScript({ env, exe: nodeExe, args: [script] }));
+  fsImpl.writeFileSync(
+    runScript,
+    // Only what the run needs. Anything describing the service's own identity
+    // stays out, so the target user's profile keeps its own.
+    buildRunScript({ env: stripUserEnvironment(env), exe: nodeExe, args: [script] })
+  );
 
   const args = buildLaunchArgs({
     scriptPath,
@@ -486,6 +521,7 @@ module.exports = {
   buildLaunchArgs,
   buildRedirectedCommandLine,
   buildRunScript,
+  stripUserEnvironment,
   defaultShell,
   parseStartedPid,
   parseResult,

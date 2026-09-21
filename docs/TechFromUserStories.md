@@ -243,6 +243,12 @@ The first scheduled desktop run in the session failed with exit code 1 and a log
 `startRunInSession` also now notices when not one byte reached the log and says so, naming the log path and quoting whatever the launcher reported. An empty log plus an exit code is the least useful thing a scheduled run can hand back.
 - `server/utils/sessionLauncher.js`, `server/utils/sessionLauncher.test.js`
 
+### EPEA-TBD-13 addendum — the service's own TEMP broke Add-Type in the run
+With the run finally executing in the session, the first step that compiled C# failed with `Source file 'C:\Windows\TEMP\....cs' could not be found`. The run environment is replayed into the child through `run.cmd`, and the service is LocalSystem, so its `TEMP` and `TMP` are `C:\Windows\TEMP`. That directory grants Users write but not read, so `csc` wrote its source file and could not read it back. Those values also overrode the correct per-user ones `CreateEnvironmentBlock` had already put in place. The contrast that confirmed it: the keep-alive uses `Add-Type` in the same session and works, because a scheduled task does not override `TEMP`.
+
+`stripUserEnvironment` now removes the variables that describe *who* is running (`TEMP`, `TMP`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `HOMEDRIVE`, `HOMEPATH`, `USERNAME`, `USERDOMAIN`, `LOGONSERVER`, `SESSIONNAME`) from what `run.cmd` carries, keeping only what describes *what* is being run, such as `NODE_PATH`. Case-insensitive, because Windows variable names are. Three tests, including one asserting `run.cmd` sets `NODE_PATH` and never `TEMP`.
+- `server/utils/sessionLauncher.js`, `server/utils/sessionLauncher.test.js`
+
 ### EPEA-TBD-15 — A machine inactivity limit locks the automation session
 `server/runners/keep-session-awake.ps1` injects a **zero-distance** mouse move (`SendInput`, `dx=0, dy=0`, `MOUSEEVENTF_MOVE`) every four minutes. Windows counts it as input and resets the idle timer, but the cursor does not move, so it cannot disturb a test that is driving the mouse at that moment; a one-pixel jiggle would, and would produce flaky failures that look like bad tests. A rejected injection is logged rather than ignored, because that is what it looks like when the session locked anyway.
 

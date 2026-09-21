@@ -216,6 +216,9 @@ async function checkWithRecovery() {
       ok: true,
       version: `uptime ${Math.floor(first.data.uptime)}s`,
       detail: `${first.data.schedules} schedule(s) loaded`,
+      // Only the service can check this: querying a session token is
+      // LocalSystem's privilege, and the per-user backend has none.
+      desktopSession: first.data.desktopSession,
     };
   }
 

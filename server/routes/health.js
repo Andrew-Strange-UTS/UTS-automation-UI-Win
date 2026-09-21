@@ -133,11 +133,40 @@ router.get("/", async (req, res) => {
   // failure, so users are not sent to a command line for a recoverable state.
   checks.scheduler = await schedulerService.checkWithRecovery();
 
+  // --- Desktop session for scheduled desktop tests (EPEA-TBD-13) ---
+  // Scheduled steps run from the service in Session 0, which has no interactive
+  // desktop, so desktop schedules need the automation account's session. The
+  // service probes it by launching a process in it and reports the result here.
+  if (!isWindows) {
+    checks.desktopSession = {
+      ok: false,
+      detail: "Scheduled desktop tests require Windows. Not available on this OS.",
+    };
+  } else if (!checks.scheduler.ok) {
+    checks.desktopSession = {
+      ok: false,
+      detail: "Unknown: the scheduler service could not be reached to check it.",
+      hint: checks.scheduler.hint,
+    };
+  } else {
+    const session = checks.scheduler.desktopSession || {};
+    checks.desktopSession = {
+      ok: Boolean(session.ok),
+      version: session.ok ? session.cause : undefined,
+      detail: session.ok ? session.cause : session.cause || "The session could not be checked.",
+      // A working but disconnected session still carries a warning, so the hint
+      // is shown whether or not the check passed.
+      hint: session.hint,
+      warn: Boolean(session.ok && session.hint),
+    };
+  }
+
   // --- Summary: what features are available ---
   const features = {
     webTests: checks.chrome.ok,
     desktopTests: isWindows && checks.powershell.ok,
     scheduling: checks.scheduler.ok,
+    desktopSchedules: isWindows && checks.scheduler.ok && checks.desktopSession.ok,
     gitClone: checks.git.ok,
     zephyrReporting: true, // Always available if secrets are configured
   };

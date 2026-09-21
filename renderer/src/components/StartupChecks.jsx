@@ -116,6 +116,17 @@ export default function StartupChecks({ onDismiss }) {
       required: false,
       feature: "Scheduled test sequences",
     },
+    {
+      // Its own row, not folded into the scheduler's tick: the service can be
+      // perfectly healthy while desktop schedules cannot run at all, because
+      // they need an interactive session that Session 0 does not have.
+      label: "Desktop Session",
+      check: checks.desktopSession || { ok: false, detail: "Not checked" },
+      info: (checks.desktopSession || {}).detail,
+      warn: !isWindows,
+      required: false,
+      feature: "Scheduled desktop tests",
+    },
   ];
 
   const allCriticalOk = checks.node.ok && checks.os.ok;
@@ -124,6 +135,7 @@ export default function StartupChecks({ onDismiss }) {
     { name: "Web Tests", available: features.webTests, needs: "Chrome" },
     { name: "Desktop Tests", available: features.desktopTests, needs: "Windows + PowerShell" },
     { name: "Scheduling", available: features.scheduling, needs: "Scheduler service" },
+    { name: "Scheduled Desktop Tests", available: features.desktopSchedules, needs: "Automation account signed in" },
     { name: "Git Clone", available: features.gitClone, needs: "Git" },
     { name: "Zephyr Reporting", available: features.zephyrReporting, needs: "ZEPHYR_API_TOKEN secret" },
   ];

@@ -18,6 +18,7 @@ const { portableEncrypt, portableDecrypt } = require("./utils/portableEncryption
 const { makeScheduleSecrets } = require("./utils/scheduleSecrets");
 const { applyDataDirAcl, repairFileAcl, applyAutomationAccess } = require("./utils/dataDirAcl");
 const sessionLauncher = require("./utils/sessionLauncher");
+const { readAccountName } = require("./utils/automationAccount");
 const {
   DataStoreError,
   readJsonWithRepair,
@@ -837,14 +838,10 @@ app.use(express.json({ limit: "50mb" }));
 // identical from the outside and cannot receive a keystroke.
 
 function automationUser() {
-  if (process.env.UTS_AUTOMATION_USER) return process.env.UTS_AUTOMATION_USER;
-  try {
-    const raw = fs.readFileSync(paths.AUTOMATION_ACCOUNT_FILE, "utf8");
-    const parsed = JSON.parse(raw);
-    return parsed.user || null;
-  } catch {
-    return null; // Not set up yet; the probe reports that as its own reason.
-  }
+  // Not set up, unreadable or malformed all mean the same thing: not
+  // configured. Guessing an account name here would run tests as the wrong
+  // user, which is worse than not running them.
+  return readAccountName(paths.AUTOMATION_ACCOUNT_FILE);
 }
 
 // The probe starts a process, so it is not free. Health is polled during

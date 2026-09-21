@@ -127,6 +127,69 @@ node scripts\uninstall-service-win.js
 Marvin also tries to start the service automatically if it finds it stopped, so
 in normal use you should not need to touch it after install.
 
+## Set up the automation account (scheduled desktop tests only)
+
+**Scheduled web tests need nothing here.** Scheduled *desktop* tests do, and
+without it they cannot work at all.
+
+The scheduler service runs as LocalSystem, which lives in Session 0. Session 0
+has its own window station and no interactive desktop, so a desktop step run
+from there fails with `Access is denied` on every keystroke and
+`The handle is invalid` on every screenshot. The same sequence passes from Run
+Sequence, because that runs in your own session.
+
+Desktop automation needs a real desktop, and a desktop needs somebody signed
+in. For runs at 3am with nobody at the machine, that means a dedicated local
+account that is signed in permanently:
+
+```powershell
+# elevated
+powershell -ExecutionPolicy Bypass -File scripts\setup-automation-account.ps1 `
+  -AppDir "C:\Marvin" -DataDir "C:\ProgramData\uts-automation"
+```
+
+What it does:
+
+- Creates the local account `marvin-auto`, **not** an administrator, with a
+  48-byte random password it generates and never shows anyone.
+- Writes that password to the **LSA secret** Winlogon reads at boot, then
+  discards it. It is not written to a file and not put in Marvin's secrets
+  store. The service never needs it: `WTSQueryUserToken` hands LocalSystem a
+  token for an already signed-in session without any credential.
+- Denies that account network logon and Remote Desktop logon, and hides it from
+  the sign-in screen. Nobody can sign in as it, not least because nobody knows
+  the password.
+- Turns off the screensaver, the secure screensaver and workstation locking
+  **for that account only**. Input cannot be sent to a locked desktop, so a
+  lock at 3am is a failed run.
+- Grants it read and execute on the install directory, and read on the run
+  directories under `C:\ProgramData\uts-automation`. The schedule store, the
+  encrypted secrets and the master key stay restricted to SYSTEM and
+  Administrators.
+
+Then **reboot**. The account signs in by itself and stays signed in.
+
+Two things to know:
+
+- **The per-user lock settings need a profile**, which only exists after the
+  first autologon. If the script says so, re-run it after the reboot with
+  `-Mode settings`.
+- **A machine-wide inactivity limit overrides all of this.** The script warns
+  if `InactivityTimeoutSecs` is set, and deliberately does not change it:
+  weakening a security baseline for the whole VM is not a script's call. If it
+  is set, that VM needs an exemption or scheduled desktop tests will start
+  failing whenever it fires.
+
+Marvin's startup checks show a **Desktop Session** row. It goes green only when
+Marvin can open that session's input desktop, which it proves by starting a
+process in the session rather than assuming it from the account existing. If it
+is red, the row names which of these is wrong.
+
+Why the install directory matters: the run executes as `marvin-auto`, so
+everything it loads has to be readable by that account. An install under
+`C:\Users\<someone>` is not. Install Marvin somewhere machine-wide, such as
+`C:\Marvin`.
+
 ## Verify the install
 
 Log in as a **second, non-administrator user** (this is the real test of a

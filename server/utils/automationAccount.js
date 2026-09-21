@@ -25,7 +25,11 @@ function readAccountName(file, { fs = fsDefault, env = process.env } = {}) {
     return isValidAccountName(env.UTS_AUTOMATION_USER) ? env.UTS_AUTOMATION_USER : null;
   }
   try {
-    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    // Windows PowerShell 5.1's `Set-Content -Encoding UTF8` writes a byte-order
+    // mark, and JSON.parse throws on it. That turned a perfectly good account
+    // file into "no automation account is set up".
+    const raw = fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "");
+    const parsed = JSON.parse(raw);
     return isValidAccountName(parsed.user) ? parsed.user : null;
   } catch {
     return null;

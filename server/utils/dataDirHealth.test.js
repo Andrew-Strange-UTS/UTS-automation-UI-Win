@@ -95,6 +95,13 @@ test("a repair that throws still lets the retry decide the outcome", () => {
   assert.deepStrictEqual(result, []);
 });
 
+test("a byte-order mark is tolerated, not reported as corrupt", () => {
+  // Invisible in every editor, fatal to JSON.parse, and written by default by
+  // both Windows PowerShell and Notepad.
+  const fs = { readFileSync: () => "\uFEFF" + '[{"id":"abc"}]' };
+  assert.deepStrictEqual(readJsonWithRepair(FILE, { fs, missingValue: [] }), [{ id: "abc" }]);
+});
+
 test("corrupt JSON is reported as corrupt, not as empty", () => {
   const fs = { readFileSync: () => "{not json" };
   assert.throws(

@@ -300,8 +300,12 @@ if ($Mode -eq "all") {
     }
 
     if (-not (Test-Path $DataDir)) { New-Item -Path $DataDir -ItemType Directory -Force | Out-Null }
-    @{ user = $Account; configuredAt = (Get-Date).ToString("o") } |
-        ConvertTo-Json | Set-Content -Path (Join-Path $DataDir "automation-account.json") -Encoding UTF8
+    # WriteAllText, not Set-Content -Encoding UTF8: Windows PowerShell 5.1
+    # writes a byte-order mark with that switch, and the service parses this
+    # file as JSON, which a BOM breaks.
+    $accountFile = Join-Path $DataDir "automation-account.json"
+    $accountJson = @{ user = $Account; configuredAt = (Get-Date).ToString("o") } | ConvertTo-Json
+    [System.IO.File]::WriteAllText($accountFile, $accountJson, (New-Object System.Text.UTF8Encoding($false)))
 } else {
     $sid = Get-AccountSid -Name $Account
 }

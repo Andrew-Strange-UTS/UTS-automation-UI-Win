@@ -217,6 +217,10 @@ Documentation: `docs/installing-on-a-vm.md` gained a "Remove an older install fi
 Covered by `server/utils/serviceScriptPath.test.js` (4 `node --test` cases). These pages are the published site (GitHub Pages builds from `docs/`), so they are live once main is pushed.
 - `server/utils/serviceScriptPath.js`, `server/utils/serviceScriptPath.test.js`, `scripts/install-service-win.js`, `scripts/uninstall-service-win.js`, `scripts/deploy-win.ps1`, `package.json`, `docs/installing-on-a-vm.md`, `docs/how-to-schedules.md`, `docs/index.md`
 
+### EPEA-TBD-13 addendum — a byte-order mark reported a working account as missing
+`Set-Content -Encoding UTF8` in Windows PowerShell 5.1 writes `EF BB BF`, and `JSON.parse` throws on it, so `readAccountName` fell into its catch and returned null. The service then reported `not-configured` for an automation account that had been created correctly, with a file that looks perfectly normal in any editor. Fixed on both sides: the setup script writes with `UTF8Encoding($false)` via `WriteAllText`, and both `automationAccount.js` and `dataDirHealth.js` strip a leading BOM before parsing, so files already written that way are read correctly without anyone having to know this happened. Covered by a case in each of their test files.
+- `scripts/setup-automation-account.ps1`, `server/utils/automationAccount.js`, `server/utils/automationAccount.test.js`, `server/utils/dataDirHealth.js`, `server/utils/dataDirHealth.test.js`
+
 ### EPEA-TBD-15 — A machine inactivity limit locks the automation session
 `server/runners/keep-session-awake.ps1` injects a **zero-distance** mouse move (`SendInput`, `dx=0, dy=0`, `MOUSEEVENTF_MOVE`) every four minutes. Windows counts it as input and resets the idle timer, but the cursor does not move, so it cannot disturb a test that is driving the mouse at that moment; a one-pixel jiggle would, and would produce flaky failures that look like bad tests. A rejected injection is logged rather than ignored, because that is what it looks like when the session locked anyway.
 

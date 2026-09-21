@@ -33,6 +33,14 @@ test("no file, bad JSON or a missing name all mean not configured", () => {
   assert.strictEqual(readAccountName(FILE, { fs: fsWith("{}"), env }), null);
 });
 
+test("a byte-order mark does not hide a perfectly good account", () => {
+  // Windows PowerShell 5.1 `Set-Content -Encoding UTF8` writes EF BB BF, which
+  // JSON.parse rejects. On the VM that turned a correctly created account into
+  // "no automation account is set up", with nothing visibly wrong with the file.
+  const fs = fsWith("\uFEFF" + JSON.stringify({ user: "marvin-auto" }));
+  assert.strictEqual(readAccountName(FILE, { fs, env: {} }), "marvin-auto");
+});
+
 test("the environment overrides the file, but is validated the same way", () => {
   const fs = fsWith(JSON.stringify({ user: "marvin-auto" }));
   assert.strictEqual(readAccountName(FILE, { fs, env: { UTS_AUTOMATION_USER: "other-auto" } }), "other-auto");

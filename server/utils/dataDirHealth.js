@@ -88,7 +88,9 @@ function readJsonWithRepair(file, opts = {}) {
   if (result.missing) return missingValue;
 
   try {
-    return JSON.parse(result.text);
+    // A BOM is invisible in every editor and fatal to JSON.parse. Windows
+    // PowerShell writes one by default, and so does Notepad.
+    return JSON.parse(result.text.replace(/^\uFEFF/, ""));
   } catch (err) {
     throw new DataStoreError(`${file} is not valid JSON (${err.message}).`, {
       code: "EBADJSON",

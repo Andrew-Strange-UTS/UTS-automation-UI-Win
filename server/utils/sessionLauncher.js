@@ -30,6 +30,7 @@ const Reason = {
   TOKEN_DENIED: "token-denied",
   LAUNCH_FAILED: "launch-failed",
   PROBE_TIMEOUT: "probe-timeout",
+  RUN_TIMEOUT: "run-timeout",
   // Set here, not by the script: no automation account has been set up yet,
   // which is a different problem from one that is not logged on.
   NOT_CONFIGURED: "not-configured",
@@ -92,13 +93,16 @@ function buildLaunchArgs({
   // working directory; inferring either fails with ERROR_INVALID_NAME.
   applicationName = defaultShell(),
   wait = true,
-  timeoutSeconds,
+  // 0 means wait indefinitely. A run is not a probe: the probe's 30 seconds cut
+  // a real sequence off mid-step and reported it as an unresponsive desktop,
+  // which it was not.
+  timeoutSeconds = 0,
 } = {}) {
   const extra = ["-Mode", "launch", "-User", user, "-CommandLine", commandLine];
   if (applicationName) extra.push("-ApplicationName", applicationName);
   if (workingDirectory) extra.push("-WorkingDirectory", workingDirectory);
   if (wait) extra.push("-Wait");
-  if (timeoutSeconds) extra.push("-TimeoutSeconds", String(timeoutSeconds));
+  extra.push("-TimeoutSeconds", String(timeoutSeconds));
   return powershellArgs(scriptPath, extra);
 }
 
@@ -209,6 +213,11 @@ function describeReason(result = {}) {
       return {
         cause: `A process could not be started in ${user}'s session${win32}`,
         hint: "The session exists and its token was taken, but process creation failed. Check the Windows Event Viewer for the failing launch.",
+      };
+    case Reason.RUN_TIMEOUT:
+      return {
+        cause: `The run hit its time limit in ${user}'s session and was stopped`,
+        hint: "The sequence was still running when the launcher's limit expired, and has been killed rather than left going with nobody reading it. Raise the limit for this schedule, or find out why the sequence no longer finishes.",
       };
     case Reason.PROBE_TIMEOUT:
       return {

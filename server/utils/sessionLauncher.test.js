@@ -64,6 +64,30 @@ test("a launch carries the command line, working directory and wait flag", () =>
   assert.ok(args.includes('cmd.exe /c "node" "run.js"'));
 });
 
+test("a run waits as long as it takes, unlike a probe", () => {
+  // The probe's 30s limit was reused for runs, so the first real scheduled
+  // sequence was cut off mid-step and reported as an unresponsive desktop.
+  const args = buildLaunchArgs({ scriptPath: SCRIPT, user: USER, commandLine: "x" });
+  const idx = args.indexOf("-TimeoutSeconds");
+
+  assert.notStrictEqual(idx, -1, "the timeout is always stated, never left to the script's default");
+  assert.strictEqual(args[idx + 1], "0", "0 means wait indefinitely");
+});
+
+test("a caller that wants a limit still gets one", () => {
+  const args = buildLaunchArgs({ scriptPath: SCRIPT, user: USER, commandLine: "x", timeoutSeconds: 600 });
+  assert.strictEqual(args[args.indexOf("-TimeoutSeconds") + 1], "600");
+});
+
+test("a run cut short is not described as an unresponsive desktop", () => {
+  const probe = describeReason({ reason: Reason.PROBE_TIMEOUT, user: USER });
+  const run = describeReason({ reason: Reason.RUN_TIMEOUT, user: USER });
+
+  assert.match(run.cause, /time limit/);
+  assert.notStrictEqual(run.cause, probe.cause, "a slow test and a wedged desktop need different answers");
+  assert.match(run.hint, /killed/, "and the run is not left going with nobody reading it");
+});
+
 test("a launch that is not waited on omits -Wait", () => {
   const args = buildLaunchArgs({ scriptPath: SCRIPT, user: USER, commandLine: "x", wait: false });
   assert.ok(!args.includes("-Wait"));

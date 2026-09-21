@@ -261,7 +261,10 @@ function Start-InSession {
         [string]$ApplicationName = $null,
         [string]$Desktop = "winsta0\default",
         [bool]$UseEnvironmentBlock = $true,
-        [int]$CreationFlags = -1
+        [int]$CreationFlags = -1,
+        # What to call a timeout. A probe that does not answer in seconds is
+        # wedged; a test run that takes minutes is just a test run.
+        [string]$TimeoutReason = "probe-timeout"
     )
 
     $userToken = [IntPtr]::Zero
@@ -313,7 +316,11 @@ function Start-InSession {
             Write-Output (@{ reason = "started"; pid = $pi.dwProcessId; sessionId = $SessionId } | ConvertTo-Json -Compress)
             $waited = [MarvinSession]::WaitForSingleObject($pi.hProcess, $TimeoutMs)
             if ($waited -eq $WAIT_TIMEOUT) {
-                $result.reason = "probe-timeout"
+                $result.reason = $TimeoutReason
+                # Do not walk away from it: without this the run keeps going in
+                # that session with nobody waiting for it or reading its output.
+                try { Stop-Process -Id $pi.dwProcessId -Force -ErrorAction Stop }
+                catch { $result.killFailed = $_.Exception.Message }
             } else {
                 # GetExitCodeProcess takes an out uint, so the variable has
                 # to be one before it is passed by reference.
@@ -492,7 +499,11 @@ if (-not $CommandLine) {
     exit 1
 }
 
-$timeoutMs = if ($Wait) { $TimeoutSeconds * 1000 } else { 0 }
+# A scheduled run has no business being cut off after the probe's timeout.
+# -TimeoutSeconds 0 means wait indefinitely; a run is stopped through the
+# scheduler's own Stop, which kills the process directly.
+$WAIT_INFINITE = [uint32]::MaxValue
+$timeoutMs = if (-not $Wait) { 0 } elseif ($TimeoutSeconds -le 0) { $WAIT_INFINITE } else { $TimeoutSeconds * 1000 }
 
 # Same rule as the probe: never leave either of these to be inferred. A working
 # directory is required even when the caller does not care what it is.
@@ -500,7 +511,7 @@ $launchDir = if ($WorkingDirectory) { $WorkingDirectory } else { Join-Path $env:
 $launchApp = if ($ApplicationName) { $ApplicationName } else { Join-Path $env:SystemRoot "System32\cmd.exe" }
 
 $outcome = Start-InSession -SessionId $session.SessionId -Command $CommandLine -Directory $launchDir `
-    -WaitForExit ([bool]$Wait) -TimeoutMs $timeoutMs -ApplicationName $launchApp
+    -WaitForExit ([bool]$Wait) -TimeoutMs $timeoutMs -ApplicationName $launchApp -TimeoutReason "run-timeout"
 
 $extra = @{ user = $User; sessionId = $session.SessionId; state = $stateName }
 foreach ($key in $outcome.Keys) { if ($key -ne "reason") { $extra[$key] = $outcome[$key] } }

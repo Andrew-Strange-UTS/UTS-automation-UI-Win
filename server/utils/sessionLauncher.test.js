@@ -390,3 +390,49 @@ test("stopping a run kills the process in the other session, not just powershell
   assert.deepStrictEqual(taskkill.args, ["/PID", "4242", "/T", "/F"]);
   assert.ok(ps.killed, "and the launcher is stopped too");
 });
+
+// ─── The session diagnostic ───
+
+const { diagnoseSession, buildDiagnoseArgs } = require("./sessionLauncher");
+
+test("the diagnostic asks the script for its diagnose mode", () => {
+  const args = buildDiagnoseArgs({ scriptPath: SCRIPT, user: USER });
+  assert.deepStrictEqual(args.slice(args.indexOf("-Mode"), args.indexOf("-Mode") + 2), ["-Mode", "diagnose"]);
+  assert.ok(args.includes(USER));
+});
+
+test("the diagnostic returns every variant's result, not just a verdict", async () => {
+  // The point is which variant Windows accepts, so a pass/fail would throw away
+  // the only useful part.
+  const payload = {
+    ok: true,
+    reason: "diagnose",
+    user: USER,
+    sessionId: 1,
+    results: [
+      { variant: "as production", reason: "launch-failed", win32: 123 },
+      { variant: "explicit application name", reason: "ok", exitCode: 0 },
+    ],
+  };
+
+  const result = await diagnoseSession({
+    user: USER,
+    platform: "win32",
+    run: async () => ({ stdout: JSON.stringify(payload) }),
+  });
+
+  assert.strictEqual(result.results.length, 2);
+  assert.strictEqual(result.results[1].reason, "ok");
+});
+
+test("a diagnostic that cannot run says so rather than reporting nothing wrong", async () => {
+  const result = await diagnoseSession({
+    user: USER,
+    platform: "win32",
+    run: async () => ({ stdout: "", stderr: "Access is denied" }),
+  });
+
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, Reason.UNREADABLE);
+  assert.match(result.detail, /Access is denied/);
+});

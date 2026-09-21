@@ -69,6 +69,14 @@ function buildProbeArgs({ scriptPath = defaultScriptPath(), user, timeoutSeconds
   ]);
 }
 
+function buildDiagnoseArgs({ scriptPath = defaultScriptPath(), user, timeoutSeconds = 120 } = {}) {
+  return powershellArgs(scriptPath, [
+    "-Mode", "diagnose",
+    "-User", user,
+    "-TimeoutSeconds", String(timeoutSeconds),
+  ]);
+}
+
 function buildLaunchArgs({
   scriptPath = defaultScriptPath(),
   user,
@@ -396,8 +404,43 @@ function startRunInSession(options = {}) {
   return emitter;
 }
 
+// Why a launch into the session fails, when the probe says it does. Only this
+// process can ask: querying a session token needs SeTcbPrivilege, which the
+// service has as LocalSystem and an interactive administrator does not.
+async function diagnoseSession(options = {}) {
+  const {
+    user,
+    scriptPath = defaultScriptPath(),
+    timeoutSeconds = 120,
+    platform = process.platform,
+    run = runPowerShell,
+  } = options;
+
+  if (platform !== "win32") {
+    return { ok: false, reason: Reason.NOT_WINDOWS };
+  }
+  if (!user) {
+    return { ok: false, reason: Reason.NOT_CONFIGURED };
+  }
+
+  const args = buildDiagnoseArgs({ scriptPath, user, timeoutSeconds });
+  const { stdout, stderr, err } = await run(args, (timeoutSeconds + 30) * 1000);
+
+  const parsed = parseResult(stdout);
+  if (!parsed) {
+    return {
+      ok: false,
+      reason: Reason.UNREADABLE,
+      detail: (stderr || "").trim() || (err && err.message) || "The diagnostic produced no result.",
+    };
+  }
+  return parsed;
+}
+
 module.exports = {
   Reason,
+  buildDiagnoseArgs,
+  diagnoseSession,
   KEEP_AWAKE_STALE_SECONDS,
   startRunInSession,
   SCRIPT_NAME,

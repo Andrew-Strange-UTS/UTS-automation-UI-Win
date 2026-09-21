@@ -891,6 +891,18 @@ app.get("/api/health", async (req, res) => {
   });
 });
 
+// Why a launch into the automation session fails. Deliberately on the service:
+// it needs SeTcbPrivilege to query a session token, which an interactive
+// administrator does not have, so this cannot be run by hand from a prompt.
+app.get("/api/diagnose/session", async (req, res) => {
+  try {
+    const result = await sessionLauncher.diagnoseSession({ user: automationUser() });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: "The session diagnostic failed to run.", detail: err.message });
+  }
+});
+
 // List all schedules
 app.get("/api/schedules", (req, res) => {
   res.json({ schedules: scheduleStore.getAll().map(safeSchedule) });

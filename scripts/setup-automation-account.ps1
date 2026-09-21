@@ -230,8 +230,11 @@ function Register-KeepAwakeTask {
 
     $action = New-ScheduledTaskAction -Execute "powershell.exe" `
         -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`" -IntervalSeconds $IntervalSeconds -DataDir `"$DataDir`""
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $Account
-    $principal = New-ScheduledTaskPrincipal -UserId $Account -LogonType Interactive -RunLevel Limited
+    # Qualified, not bare: a bare name does not match the logon, and the task
+    # sits at SCHED_S_TASK_HAS_NOT_RUN forever without ever reporting an error.
+    $qualified = "$env:COMPUTERNAME\$Account"
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $qualified
+    $principal = New-ScheduledTaskPrincipal -UserId $qualified -LogonType Interactive -RunLevel Limited
     # Defaults would stop it after three days and refuse to start it on battery
     # or while the machine is "idle", which is precisely when it is needed.
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `

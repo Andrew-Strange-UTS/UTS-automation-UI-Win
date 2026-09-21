@@ -420,6 +420,26 @@
 
 ---
 
+### EPEA-TBD-13 — Scheduled desktop tests cannot reach a desktop `13 pts`
+
+**Description:** The scheduler service runs as LocalSystem, so it lives in Session 0, which has no interactive desktop. Every scheduled step inherits that session, so `SendKeys` fails with "Access is denied" and screen capture with "The handle is invalid", while the same sequence passes from Run Sequence in the user's own session. Scheduled web tests are unaffected: headless Chrome needs no desktop. Schedules must fire at 3am with nobody at the machine, so the fix is a dedicated local-only automation account that is always logged on, plus `CreateProcessAsUser` to launch runs into that account's session.
+
+**Note on credentials:** the service needs no password at run time. `WTSQueryUserToken` returns the token of an already logged-on session to LocalSystem without credentials. A password is required once, at install, and only by Winlogon, which cannot read Marvin's encrypted store. So the account password is generated at install, written to the LSA secret, and discarded: Marvin never stores it and no human ever sees it.
+
+**Acceptance Criteria:**
+- [ ] AC1: The service launches a desktop run into the automation account's interactive session (`WTSQueryUserToken` → `DuplicateTokenEx` → `CreateEnvironmentBlock` → `CreateProcessAsUser`, desktop `winsta0\default`), implemented as PowerShell P/Invoke with no native module.
+- [ ] AC2: The automation account is local only: not a domain account, denied network logon and denied Remote Desktop logon, and hidden from the sign-in screen's user list.
+- [ ] AC3: Nobody can sign in as that account. Its password is generated at install from a CSPRNG, written only to the LSA secret, never displayed, never written to disk and never placed in Marvin's secrets store.
+- [ ] AC4: The no-lock, no-screensaver and no-inactivity-timeout settings are applied to that account's profile alone (per-user settings, not the machine-wide inactivity policy) and provably do not change any other user's session on the VM.
+- [ ] AC5: Marvin's startup check shows a green tick only when a usable session for the automation account actually exists: present, unlocked and able to accept input. It proves this by launching a probe process into that session, not by inferring it from the account existing.
+- [ ] AC6: The startup check goes red with a named cause for each distinct failure: no session, session locked, wrong account logged on, and token acquisition denied.
+- [ ] AC7: A schedule with desktop steps that fires with no usable session fails with that reason, and notifies through the existing ntfy/Teams channels. A raw "Access is denied" never reaches the user.
+- [ ] AC8: Web-only schedules continue to run with no session requirement and no behaviour change.
+- [ ] AC9: Password recovery is documented as "reset the account and re-run the setup step", since no copy is kept anywhere.
+- [ ] AC10: Verified on the VM at 3am with nobody connected, including the deliberate failure case where the automation session is locked and the run is expected to fail loudly.
+
+---
+
 ## Secrets Management
 
 ### EPEA-2505 — User encrypted secrets store `8 pts`

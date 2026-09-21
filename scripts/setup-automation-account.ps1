@@ -228,8 +228,10 @@ if ($Mode -eq "all") {
     if ($existing) {
         Set-LocalUser -Name $Account -Password $secure -PasswordNeverExpires $true
     } else {
+        # Windows caps a local account description at 48 characters, and
+        # New-LocalUser refuses the whole call if it is longer.
         New-LocalUser -Name $Account -Password $secure -FullName "Marvin automation" `
-            -Description "Runs Marvin's scheduled desktop tests. No interactive sign-in by people." `
+            -Description "Marvin scheduled desktop tests. No human logon." `
             -PasswordNeverExpires -UserMayNotChangePassword | Out-Null
     }
     # Deliberately not added to Administrators.

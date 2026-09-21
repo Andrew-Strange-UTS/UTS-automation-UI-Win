@@ -37,10 +37,21 @@ const SCRIPT = resolveSchedulerScript({
   fallbackDir: path.resolve(__dirname, "../server"),
 });
 
+// node-windows defaults the service's working directory to wherever this script
+// was run from, which is normally a clone in somebody's profile. That directory
+// is then inherited by anything the service launches, and the automation
+// account cannot be in another user's profile: it is what made every
+// CreateProcessAsUser call fail with ERROR_INVALID_NAME. It also breaks the
+// service outright if that clone is ever deleted. Both spellings are passed
+// because the option's casing differs between node-windows versions.
+const WORKING_DIR = path.dirname(SCRIPT);
+
 const svc = new Service({
   name: "Marvin Scheduler",
   description: "Runs scheduled test sequences for Marvin. Shared across all users.",
   script: SCRIPT,
+  workingDirectory: WORKING_DIR,
+  workingdirectory: WORKING_DIR,
   env: [
     { name: "UTS_SCHEDULER_PORT", value: "5050" },
     { name: "NODE_PATH", value: nodeModulesFor(SCRIPT) },
@@ -68,4 +79,5 @@ svc.on("error", (err) => {
 
 console.log(`Installing Marvin Scheduler as a Windows Service...`);
 console.log(`Service script: ${SCRIPT}`);
+console.log(`Working directory: ${WORKING_DIR}`);
 svc.install();

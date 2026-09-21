@@ -30,6 +30,15 @@ All of this runs in **one elevated PowerShell window** (right-click PowerShell,
 **Run as administrator**). Every step has a **Check**. If a check does not look
 right, stop and read the matching part of [Reference](#reference).
 
+Prove the window is elevated before you start. Without this, service commands
+fail quietly and you will get halfway through with nothing having happened:
+
+```powershell
+([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+```
+
+It must print `True`.
+
 Steps 6 and 7 are only for **scheduled desktop tests**. Skip them if you only
 schedule web tests.
 
@@ -54,24 +63,47 @@ cd server; npm install; cd ..
 
 Skip this on a VM that has never had Marvin installed.
 
-This must happen **before** you install, and it must name the path the service
-was registered with. If Marvin was previously run from a clone, that is the
-clone's path:
+This must happen **before** you install. First see what is registered and stop
+it. No `-ErrorAction SilentlyContinue` here on purpose: if stopping fails, you
+need to see it rather than carry on.
 
 ```powershell
-Stop-Service -DisplayName "Marvin Scheduler" -ErrorAction SilentlyContinue
-node scripts\uninstall-service-win.js --script "C:\Users\<you>\UTS-win-automation-UI\server\scheduler-service.js"
-Remove-Item -Recurse -Force C:\Users\<you>\UTS-win-automation-UI\server\daemon -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Service -Filter "Name like 'marvin%'" | Select Name, State, PathName | Format-List
+Stop-Service -DisplayName "Marvin Scheduler"
+Get-Service -DisplayName "Marvin Scheduler"
 ```
 
-**Check** — this should return nothing:
+The second command must show **Stopped** before you go on.
+
+Now remove the registration. `sc.exe` is the reliable way: it does not care
+where the service's files are or whether they still exist. Use the `Name` from
+the first command (it usually ends in `.exe`):
+
+```powershell
+sc.exe delete "marvinscheduler.exe"
+```
+
+**Check** — this should return nothing at all:
 
 ```powershell
 Get-Service -DisplayName "Marvin Scheduler" -ErrorAction SilentlyContinue
 ```
 
-Not sure which copy owns the service? See
-[Remove an older install first](#remove-an-older-install-first).
+**Only once that check is clean**, delete the old daemon folder:
+
+```powershell
+Remove-Item -Recurse -Force C:\Users\<you>\UTS-win-automation-UI\server\daemon
+```
+
+Deleting it earlier removes the service's own executable and logs while it is
+still registered, which leaves a service that cannot start and cannot easily be
+removed.
+
+There is also `node scripts\uninstall-service-win.js --script "<the PathName's
+server\scheduler-service.js>"`, which unregisters it the same way it was
+registered. It needs `node-windows`, which lives in `server/node_modules`, so
+run `cd server && npm install` first if it complains. `sc.exe delete` needs
+nothing and is the safer choice when an install is already part-dismantled.
 
 ### 4. Build
 
@@ -225,21 +257,30 @@ Get-CimInstance Win32_Service -Filter "Name like 'marvin%'" | Select Name, Start
 prompt:
 
 ```powershell
-# 1. Stop it
-Stop-Service -DisplayName "Marvin Scheduler" -ErrorAction SilentlyContinue
+# 1. Stop it, and confirm it stopped
+Stop-Service -DisplayName "Marvin Scheduler"
+Get-Service -DisplayName "Marvin Scheduler"
 
-# 2. Remove it, naming the SAME script path it was installed with.
-#    node-windows derives the daemon directory from that path, so a service
-#    registered from a clone has to be removed from that clone (or by pointing
-#    --script at it).
+# 2a. Remove the registration. sc.exe does not depend on the service's files
+#     still being intact, so it works even on a part-dismantled install.
+#     Use the Name from the PathName check above.
+sc.exe delete "marvinscheduler.exe"
+
+# 2b. Or unregister it the way it was registered, naming the SAME script path.
+#     node-windows derives the daemon directory from that path, so a service
+#     registered from a clone has to be removed by pointing --script at it.
+#     Needs node-windows, which lives in server/node_modules.
 node scripts\uninstall-service-win.js --script "C:\Users\<you>\UTS-win-automation-UI\server\scheduler-service.js"
 
-# 3. Confirm it is gone
+# 3. Confirm it is gone: this should return nothing
 Get-Service -DisplayName "Marvin Scheduler" -ErrorAction SilentlyContinue
 ```
 
-If step 2 leaves a `server\daemon` folder behind in the old location, delete it.
-Then close Marvin in every session and delete the old app folder.
+**Delete the `server\daemon` folder only after step 3 comes back empty.** It
+holds the service's own executable and its logs, so removing it while the
+service is still registered leaves something that cannot start and cannot
+cleanly be removed. Then close Marvin in every session and delete the old app
+folder.
 
 **Do not delete `C:\ProgramData\uts-automation`.** It holds every schedule,
 the encrypted secrets, and `secrets_master_key`. Every secret ever stored, and

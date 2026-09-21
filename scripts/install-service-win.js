@@ -6,12 +6,24 @@
 const path = require("path");
 const { resolveSchedulerScript, nodeModulesFor } = require("../server/utils/serviceScriptPath");
 
+// node-windows is declared in server/package.json, but this script lives in
+// scripts/, so a bare require() resolves against the ROOT node_modules and
+// misses it. Look in the server's own node_modules too, or a plain
+// `npm install` at the root leaves these scripts unable to run at all.
 let Service;
 try {
   Service = require("node-windows").Service;
 } catch {
-  console.error("node-windows is not installed. Run:\n  npm install node-windows\n");
-  process.exit(1);
+  try {
+    Service = require(path.join(__dirname, "..", "server", "node_modules", "node-windows")).Service;
+  } catch {
+    console.error(
+      "node-windows was not found.\n" +
+        "It is a dependency of the server, so install it there:\n" +
+        "  cd server && npm install\n"
+    );
+    process.exit(1);
+  }
 }
 
 // Point the service at the machine-wide install, not at whatever clone this

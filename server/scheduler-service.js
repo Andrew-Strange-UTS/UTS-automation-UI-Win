@@ -17,6 +17,13 @@ const paths = require("./scheduler-service-paths");
 const { portableEncrypt, portableDecrypt } = require("./utils/portableEncryption");
 const { makeScheduleSecrets } = require("./utils/scheduleSecrets");
 const { applyDataDirAcl, repairFileAcl } = require("./utils/dataDirAcl");
+const {
+  DataStoreError,
+  readJsonWithRepair,
+  writeWithRepair,
+  probeWritable,
+  repairHint,
+} = require("./utils/dataDirHealth");
 const { getChromeBinary, getHeadlessUserAgent } = require("./utils/chromeFinder");
 
 const PORT = parseInt(process.env.UTS_SCHEDULER_PORT || "5050", 10);
@@ -203,15 +210,24 @@ const getScheduleSecrets = scheduleSecrets.getScheduleSecrets;
 
 // ─── Schedule store (JSON file in shared data dir) ───
 
+// Permissions repair for a file in the shared data directory. The directory
+// comes first: the file is reset to inherit, so the directory's ACL has to be
+// the correct one by then.
+function repairDataFile(file) {
+  if (process.platform !== "win32") return; // icacls/takeown are Windows-only
+  applyDataDirAcl(paths.DATA_DIR);
+  repairFileAcl(file);
+}
+
+// A read failure is never turned into an empty list. Reporting "no schedules"
+// when the truth is "I cannot read your schedules" hid a locked schedules.json
+// for two months, during which every schedule silently stopped running.
 function loadSchedules() {
-  try {
-    if (fs.existsSync(paths.SCHEDULES_FILE)) {
-      return JSON.parse(fs.readFileSync(paths.SCHEDULES_FILE, "utf8"));
-    }
-  } catch (e) {
-    console.error("[scheduleStore] Failed to load:", e.message);
-  }
-  return [];
+  return readJsonWithRepair(paths.SCHEDULES_FILE, {
+    repair: repairDataFile,
+    missingValue: [],
+    onLog: (msg) => console.error(`[scheduleStore] ${msg}`),
+  });
 }
 
 function saveSchedules(schedules) {
@@ -219,7 +235,40 @@ function saveSchedules(schedules) {
   // plaintext `bundledSecrets` object is converted to `bundledSecretsEnc` here,
   // which also migrates legacy records the first time they are saved.
   const safe = scheduleSecrets.prepareForSave(schedules);
-  fs.writeFileSync(paths.SCHEDULES_FILE, JSON.stringify(safe, null, 2));
+  writeWithRepair(paths.SCHEDULES_FILE, JSON.stringify(safe, null, 2), {
+    repair: repairDataFile,
+    onLog: (msg) => console.error(`[scheduleStore] ${msg}`),
+  });
+}
+
+// What the health check reports. Both halves of the store are exercised: a
+// service that can read but not write looks perfectly healthy right up until
+// someone adds a schedule, which is exactly how this failed in production.
+function checkStore() {
+  const result = { path: paths.DATA_DIR, storeFile: paths.SCHEDULES_FILE };
+
+  try {
+    result.schedules = loadSchedules().length;
+    result.read = true;
+  } catch (err) {
+    result.read = false;
+    result.schedules = null;
+    result.detail = err.message;
+    result.failingPath = err.path || paths.SCHEDULES_FILE;
+  }
+
+  const write = probeWritable(paths.DATA_DIR);
+  result.write = write.ok;
+  if (!write.ok) {
+    result.detail = result.detail ? `${result.detail} ${write.detail}` : write.detail;
+    result.failingPath = result.failingPath || write.path;
+  }
+
+  result.ok = result.read && result.write;
+  if (!result.ok) {
+    result.hint = repairHint(result.failingPath, paths.DATA_DIR);
+  }
+  return result;
 }
 
 const scheduleStore = {
@@ -617,7 +666,17 @@ async function sendNotifications(schedule, code, logs) {
 // ─── Scheduler operations ───
 
 function executeSchedule(scheduleId) {
-  const schedule = scheduleStore.getById(scheduleId);
+  let schedule;
+  try {
+    schedule = scheduleStore.getById(scheduleId);
+  } catch (err) {
+    console.error(
+      `[scheduler] Cannot run ${scheduleId}: the schedule store is unreadable.\n` +
+        `[scheduler]   ${err.message}\n` +
+        `[scheduler]   ${repairHint(err.path || paths.SCHEDULES_FILE, paths.DATA_DIR)}`
+    );
+    return;
+  }
   if (!schedule || schedule.status === "stopped") return;
   if (runningProcesses[scheduleId]) {
     console.log(`[scheduler] Schedule ${scheduleId} already running, skipping.`);
@@ -638,10 +697,16 @@ function executeSchedule(scheduleId) {
       const logFile = path.join(logDir, new Date().toISOString().replace(/[:.]/g, "-") + ".log");
       fs.writeFileSync(logFile, runLogs[scheduleId] || "");
 
-      scheduleStore.update(scheduleId, {
-        lastRun: new Date().toISOString(),
-        lastResult: code === 0 ? "passed" : "failed",
-      });
+      try {
+        scheduleStore.update(scheduleId, {
+          lastRun: new Date().toISOString(),
+          lastResult: code === 0 ? "passed" : "failed",
+        });
+      } catch (err) {
+        // The run itself already happened; losing the result record must not
+        // take the service down with it.
+        console.error(`[scheduler] Could not record the run result for ${scheduleId}: ${err.message}`);
+      }
       console.log(`[scheduler] ${schedule.name} finished with code ${code}`);
       sendNotifications(schedule, code, runLogs[scheduleId]);
     }
@@ -691,7 +756,19 @@ function migrateSecretsAtRest() {
 }
 
 function restoreSchedules() {
-  const all = scheduleStore.getAll();
+  let all;
+  try {
+    all = scheduleStore.getAll();
+  } catch (err) {
+    // Staying up with a broken store beats exiting: a running service can tell
+    // the user what is wrong through /api/health, a dead one cannot.
+    console.error(
+      `[scheduler] Cannot read the schedule store, so NO schedules are running.\n` +
+        `[scheduler]   ${err.message}\n` +
+        `[scheduler]   ${repairHint(err.path || paths.SCHEDULES_FILE, paths.DATA_DIR)}`
+    );
+    return;
+  }
   for (const schedule of all) {
     if (schedule.status === "active") startJob(schedule);
   }
@@ -723,9 +800,24 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 
-// Health check
+// Health check. Uptime alone says nothing about whether the service can read
+// or write its own data directory, which is the state that hid a two-month
+// outage behind a green tick.
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", uptime: process.uptime(), schedules: scheduleStore.getAll().length });
+  const store = checkStore();
+  res.status(store.ok ? 200 : 503).json({
+    status: store.ok ? "ok" : "degraded",
+    uptime: process.uptime(),
+    schedules: store.schedules,
+    dataDir: {
+      path: store.path,
+      read: store.read,
+      write: store.write,
+      failingPath: store.failingPath,
+    },
+    detail: store.detail,
+    hint: store.hint,
+  });
 });
 
 // List all schedules
@@ -981,6 +1073,29 @@ app.post("/api/schedules/import", (req, res) => {
 });
 
 // ─── Start server ───
+
+// Error handler. Must stay last, after every route. Without it Express answers
+// an unexpected throw with an HTML page, which the Electron backend cannot
+// parse and used to report as the service being down.
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+
+  if (err instanceof DataStoreError) {
+    console.error(`[scheduler] ${err.message}`);
+    return res.status(503).json({
+      error: "The scheduler service cannot reach its data directory.",
+      detail: err.message,
+      path: err.path,
+      hint: repairHint(err.path || paths.DATA_DIR, paths.DATA_DIR),
+    });
+  }
+
+  console.error("[scheduler] Unhandled error:", err.stack || err.message);
+  return res.status(500).json({
+    error: "The scheduler service failed to handle the request.",
+    detail: err.message,
+  });
+});
 
 migrateSecretsAtRest();
 restoreSchedules();

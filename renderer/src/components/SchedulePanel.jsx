@@ -74,6 +74,17 @@ function Countdown({ time, days, status }) {
   );
 }
 
+// The server sends `error` plus, where it knows more, `detail` and `hint`.
+// Showing only `error` is what left a plain EPERM on schedules.json looking
+// like the scheduler service was not running.
+function describeError(payload, fallback) {
+  if (!payload || typeof payload !== "object") return fallback;
+  const parts = [payload.error || fallback];
+  if (payload.detail) parts.push(`\nDetail: ${payload.detail}`);
+  if (payload.hint) parts.push(`\n${payload.hint}`);
+  return parts.join("");
+}
+
 export default function SchedulePanel({ sequencePayload, stepNames }) {
   const [schedules, setSchedules] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
@@ -118,6 +129,9 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
       } else if (res.status === 503) {
         setServiceDown(true);
         setSchedules([]);
+      } else {
+        // 500/502: the service is reachable, so the banner would be a lie.
+        setServiceDown(false);
       }
     } catch (e) {
       console.error("Failed to fetch schedules:", e);
@@ -166,8 +180,8 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
         setShowCreate(false);
         fetchSchedules();
       } else {
-        const err = await res.json();
-        alert(err.error || "Failed to create schedule");
+        const err = await res.json().catch(() => null);
+        alert(describeError(err, "Failed to create schedule"));
       }
     } catch (e) {
       alert("Failed to create schedule");
@@ -183,8 +197,8 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
       });
       if (res.ok) fetchSchedules();
       else {
-        const err = await res.json();
-        alert(err.error || `Failed to ${action}`);
+        const err = await res.json().catch(() => null);
+        alert(describeError(err, `Failed to ${action}`));
       }
     } catch (e) {
       alert(`Failed to ${action}`);
@@ -246,8 +260,8 @@ export default function SchedulePanel({ sequencePayload, stepNames }) {
         setEditingId(null);
         fetchSchedules();
       } else {
-        const err = await res.json();
-        alert(err.error || "Failed to update schedule");
+        const err = await res.json().catch(() => null);
+        alert(describeError(err, "Failed to update schedule"));
       }
     } catch (e) {
       alert("Failed to update schedule");

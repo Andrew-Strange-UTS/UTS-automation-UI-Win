@@ -29,24 +29,51 @@ const Reason = {
   NOT_INSTALLED: "not-installed",
   PERMISSION_DENIED: "permission-denied",
   WILL_NOT_START: "will-not-start",
+  // Answering, but unable to read or write its data directory. Starting it
+  // again cannot fix this, so it must never be treated as "down".
+  DEGRADED: "degraded",
   UNKNOWN: "unknown",
 };
 
+// `reachable` and `ok` are deliberately separate. A service that answers but
+// cannot read its own schedule store is not down: restarting it changes
+// nothing, and reporting it as down sends people to the wrong fix.
 function probe(timeoutMs = PROBE_TIMEOUT_MS) {
   return (async () => {
+    let res;
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
-      const res = await fetch(`${SCHEDULER_URL}/api/health`, { signal: controller.signal });
+      res = await fetch(`${SCHEDULER_URL}/api/health`, { signal: controller.signal });
       clearTimeout(timer);
-      if (!res.ok) {
-        return { ok: false, detail: `Service returned HTTP ${res.status}` };
-      }
-      const data = await res.json();
-      return { ok: true, data };
     } catch (err) {
-      return { ok: false, detail: `Service not running on ${SCHEDULER_URL}` };
+      return { ok: false, reachable: false, detail: `Service not running on ${SCHEDULER_URL}` };
     }
+
+    // The degraded reply is a 503 that still carries a JSON body worth reading.
+    let data = null;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
+
+    if (data && data.status === "degraded") {
+      return {
+        ok: false,
+        reachable: true,
+        degraded: true,
+        data,
+        detail: data.detail || "The scheduler service cannot use its data directory.",
+        hint: data.hint,
+      };
+    }
+
+    if (!res.ok) {
+      return { ok: false, reachable: true, detail: `Service returned HTTP ${res.status}` };
+    }
+
+    return { ok: true, reachable: true, data };
   })();
 }
 
@@ -84,7 +111,11 @@ function classifyFailure(output) {
     text.includes("permission denied") ||
     text.includes("requires elevation") ||
     text.includes("authentication is required") ||
-    text.includes("insufficient privilege")
+    text.includes("insufficient privilege") ||
+    // A standard user cannot open the service for start rights; Windows words
+    // that as "cannot open <name> service on computer '.'", never "denied".
+    text.includes("service on computer") ||
+    text.includes("openservice")
   ) {
     return Reason.PERMISSION_DENIED;
   }
@@ -162,6 +193,10 @@ function hintFor(reason) {
       return isWindows
         ? "The scheduler service is installed but Marvin does not have permission to start it. Ask an administrator to start the 'Marvin Scheduler' service, or set it to start automatically."
         : "The scheduler service is installed but could not be started without elevation. Run: sudo systemctl start uts-scheduler";
+    case Reason.DEGRADED:
+      return isWindows
+        ? "The scheduler service is running but cannot read or write C:\\ProgramData\\uts-automation. Restarting it will not help: repair the directory's permissions from an elevated prompt, then restart the service."
+        : "The scheduler service is running but cannot read or write its data directory. Check the ownership and permissions of /var/lib/uts-automation.";
     case Reason.WILL_NOT_START:
       return isWindows
         ? "The scheduler service is installed but will not start. Check the Windows Event Viewer, or run it in the foreground to see the error: node server\\scheduler-service.js"
@@ -181,6 +216,18 @@ async function checkWithRecovery() {
       ok: true,
       version: `uptime ${Math.floor(first.data.uptime)}s`,
       detail: `${first.data.schedules} schedule(s) loaded`,
+    };
+  }
+
+  // Reachable but unhealthy. Starting it again would achieve nothing, and the
+  // service already knows what is wrong, so pass its own words through.
+  if (first.reachable) {
+    return {
+      ok: false,
+      detail: first.detail,
+      reason: first.degraded ? Reason.DEGRADED : Reason.UNKNOWN,
+      hint: first.hint || hintFor(Reason.DEGRADED),
+      attempted: false,
     };
   }
 

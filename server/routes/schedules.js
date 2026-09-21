@@ -34,10 +34,44 @@ function gatherSecrets() {
   return s;
 }
 
+// ─── Failure classes ───
+//
+// These used to be one message. "Scheduler service is not running" was returned
+// for a service that had been up for 28 hours but answered with an HTML error
+// page, and for errors raised here before the service was contacted at all.
+// Each failure now has to identify itself.
+
+// The request never reached the service.
+class UpstreamUnreachable extends Error {}
+
+// The service answered with something that is not JSON, e.g. Express's HTML
+// error page. The status and a readable excerpt matter more than the parse
+// error, which only ever says `Unexpected token '<'`.
+class UpstreamBadReply extends Error {
+  constructor(status, body) {
+    const excerpt = String(body || "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 300);
+    super(`HTTP ${status}: ${excerpt || "(empty response)"}`);
+    this.status = status;
+  }
+}
+
+async function callScheduler(url, options) {
+  try {
+    return await fetch(url, options);
+  } catch (err) {
+    throw new UpstreamUnreachable(err.message);
+  }
+}
+
 // ─── Unavailable-service handling ───
 
 // The service being down is often recoverable, so try to start it and let the
-// caller retry once before surfacing an error.
+// caller retry once before surfacing an error. Only ever reached when the
+// connection itself failed.
 async function handleUnavailable(res, err, retry) {
   const attempt = await schedulerService.attemptStartThrottled();
 
@@ -46,6 +80,10 @@ async function handleUnavailable(res, err, retry) {
       return await retry();
     } catch (retryErr) {
       err = retryErr;
+      // A service that started and then answered badly is a different fault.
+      if (retryErr instanceof UpstreamBadReply) {
+        return respondBadReply(res, retryErr);
+      }
     }
   }
 
@@ -55,6 +93,29 @@ async function handleUnavailable(res, err, retry) {
     reason: attempt.reason,
     hint: schedulerService.hintFor(attempt.reason),
     attempted: !attempt.throttled,
+  });
+}
+
+function respondBadReply(res, err) {
+  return res.status(502).json({
+    error: "The scheduler service returned a response Marvin could not read.",
+    detail: err.message,
+    hint:
+      "The service is running but failed while handling the request. Check its log " +
+      "(server\\daemon\\marvinscheduler.err.log on Windows) or run it in the foreground.",
+  });
+}
+
+function respondBundlingFailure(res, err, testName) {
+  return res.status(500).json({
+    error: testName
+      ? `Marvin could not prepare the test "${testName}" for scheduling.`
+      : "Marvin could not prepare the schedule.",
+    detail: err.message,
+    hint:
+      "This failed inside Marvin before the scheduler service was contacted, so the " +
+      "service itself is not the problem. Check that the test folder and its images " +
+      "are readable.",
   });
 }
 
@@ -68,7 +129,7 @@ async function proxy(req, res) {
       options.headers["Content-Type"] = "application/json";
       options.body = JSON.stringify(req.body);
     }
-    const upstream = await fetch(targetUrl, options);
+    const upstream = await callScheduler(targetUrl, options);
     const contentType = upstream.headers.get("content-type") || "";
 
     // Binary response (export .utsb file)
@@ -81,14 +142,25 @@ async function proxy(req, res) {
       return res.status(upstream.status).send(buffer);
     }
 
-    const data = await upstream.json();
+    const text = await upstream.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new UpstreamBadReply(upstream.status, text);
+    }
     return res.status(upstream.status).json(data);
   };
 
   try {
     return await send();
   } catch (err) {
-    return handleUnavailable(res, err, send);
+    if (err instanceof UpstreamUnreachable) return handleUnavailable(res, err, send);
+    if (err instanceof UpstreamBadReply) return respondBadReply(res, err);
+    return res.status(500).json({
+      error: "Marvin failed while talking to the scheduler service.",
+      detail: err.message,
+    });
   }
 }
 
@@ -96,14 +168,19 @@ async function proxy(req, res) {
 
 async function enrichAndProxy(req, res) {
   const targetUrl = `${SCHEDULER_URL}${req.originalUrl}`;
+  let bundlingTest = null;
+  let body;
+
+  // Bundling is local work. A failure here says nothing about the service, so
+  // it must never be reported as the service being down.
   try {
-    // Bundle secrets and test code from the Electron app's local data
-    const body = { ...req.body };
+    body = { ...req.body };
     if (body.sequencePayload && body.sequencePayload.sequence) {
       body.bundledSecrets = gatherSecrets();
       body.bundledTestCode = {};
       body.bundledImages = {};
       for (const test of body.sequencePayload.sequence) {
+        bundlingTest = test.name || test.builtin;
         const code = readTestCode(test);
         body.bundledTestCode[test.builtin || test.name] = code;
         // Bundle images from the test's images/ folder
@@ -120,26 +197,37 @@ async function enrichAndProxy(req, res) {
         }
       }
     }
-
-    // Only the POST is retried; bundling above is local work that cannot fail
-    // because the service is down.
-    const send = async () => {
-      const upstream = await fetch(targetUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await upstream.json();
-      return res.status(upstream.status).json(data);
-    };
-
-    try {
-      return await send();
-    } catch (err) {
-      return handleUnavailable(res, err, send);
-    }
   } catch (err) {
-    return handleUnavailable(res, err, null);
+    return respondBundlingFailure(res, err, bundlingTest);
+  }
+
+  // Only the POST is retried; the bundling above is local work that cannot fail
+  // because the service is down.
+  const send = async () => {
+    const upstream = await callScheduler(targetUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const text = await upstream.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new UpstreamBadReply(upstream.status, text);
+    }
+    return res.status(upstream.status).json(data);
+  };
+
+  try {
+    return await send();
+  } catch (err) {
+    if (err instanceof UpstreamUnreachable) return handleUnavailable(res, err, send);
+    if (err instanceof UpstreamBadReply) return respondBadReply(res, err);
+    return res.status(500).json({
+      error: "Marvin failed while talking to the scheduler service.",
+      detail: err.message,
+    });
   }
 }
 

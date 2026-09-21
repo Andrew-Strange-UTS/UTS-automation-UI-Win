@@ -91,9 +91,30 @@ child.on("exit", (code) => {
       // dist listing is best-effort.
     }
   } else {
-    console.error(`\n✖ Build failed after ${secs()}s (exit code ${code}).`);
-    console.error(`  If the NSIS step failed on a locked-down machine, deploy`);
-    console.error(`  dist/win-unpacked with scripts/deploy-win.ps1 instead.`);
+    // A non-zero exit here is usually only the NSIS step being blocked by
+    // machine policy, which happens after the app is packaged. Saying "Build
+    // failed" in that case sends people looking for a problem they do not have,
+    // so check what actually came out before deciding what to call it.
+    const unpacked = path.join(__dirname, "..", "dist", "win-unpacked", "Marvin.exe");
+    let packaged = false;
+    try {
+      packaged = fs.existsSync(unpacked);
+    } catch {
+      // Treat an unreadable dist as "not packaged".
+    }
+
+    if (packaged) {
+      console.error(`\n✖ electron-builder exited with code ${code} after ${secs()}s.`);
+      console.error(`  The app itself packaged fine: dist/win-unpacked is complete.`);
+      console.error(`  On a locked-down machine this is normally just the NSIS installer`);
+      console.error(`  step being blocked (spawn EPERM), and you do not need it.`);
+      console.error(`  Carry on and install with:`);
+      console.error(`    powershell -ExecutionPolicy Bypass -File scripts\\deploy-win.ps1`);
+    } else {
+      console.error(`\n✖ Build failed after ${secs()}s (exit code ${code}).`);
+      console.error(`  dist/win-unpacked is missing, so this is a real build failure,`);
+      console.error(`  not the usual blocked NSIS step.`);
+    }
   }
   process.exit(code);
 });

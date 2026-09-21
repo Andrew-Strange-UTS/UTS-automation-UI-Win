@@ -111,10 +111,31 @@ nothing and is the safer choice when an install is already part-dismantled.
 npm run dist
 ```
 
-A few minutes. Ending with `spawn EPERM` on NSIS is normal on a managed machine:
-the folder you need, `dist\win-unpacked`, is already built.
+A few minutes.
 
-**Check** — `dist\win-unpacked\Marvin.exe` exists.
+> **This step is expected to end in what looks like a failure.** On a managed
+> VM you will see something like:
+>
+> ```
+> ⨯ spawn EPERM     failedTask=build
+> ✖ Build failed after 132s (exit code 1).
+> ```
+>
+> That is only the **NSIS installer** step, which machine policy blocks from
+> running `makensis.exe`. It happens *after* the app itself has been packaged,
+> so the folder you actually deploy, `dist\win-unpacked`, is complete and
+> correct. Step 5 installs from that folder and never touches the `.exe`
+> installer. Carry on.
+
+**Check** — this is what decides whether the build worked, not the exit code:
+
+```powershell
+Test-Path dist\win-unpacked\Marvin.exe
+```
+
+`True` means you have everything you need. If it is `False`, or the build failed
+with something other than `spawn EPERM` on NSIS, that is a real failure: see
+[Troubleshooting](#troubleshooting).
 
 ### 5. Install machine-wide
 
@@ -309,10 +330,13 @@ hundred KB, see the troubleshooting note below):
 ### Method 2: the PowerShell deploy script (recommended on locked-down VMs)
 
 On many managed/corporate machines the NSIS installer **cannot be built**,
-because the security policy blocks the downloaded `makensis.exe` from running
-(you get `spawn EPERM`). The packaging step before NSIS still succeeds, so
+because the security policy blocks the downloaded `makensis.exe` from running.
+The build ends with `spawn EPERM` and `Build failed after Ns (exit code 1)`,
+which looks fatal and is not: the packaging step before NSIS still succeeds, so
 `dist\win-unpacked` is a complete, working app, and `scripts\deploy-win.ps1`
 installs that folder machine-wide, doing the same job as the NSIS installer.
+Judge the build by whether `dist\win-unpacked\Marvin.exe` exists, not by the
+exit code.
 
 1. Copy the built `win-unpacked` folder (and the `scripts` folder next to it) to
    the VM, or to a network share reachable from the VM.

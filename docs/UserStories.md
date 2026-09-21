@@ -437,7 +437,7 @@
 - [ ] AC8: Web-only schedules continue to run with no session requirement and no behaviour change.
 - [ ] AC9: Password recovery is documented as "reset the account and re-run the setup step", since no copy is kept anywhere. *(Documented in `docs/installing-on-a-vm.md` and in the script header.)*
 - [x] AC11: Everything a scheduled desktop run needs to read is readable by the automation account: the per-run temp directory, the runners and utils, and `node_modules`. The shared schedule store, the encrypted secrets and the master key stay restricted to SYSTEM and Administrators. *(Per-path grants built and tested, applied by the service at startup. Needs the machine-wide install to cover `node_modules`.)* **Verified on the VM:** `runDirectoryAccessGranted: true`, and the keep-alive writes to the run directory.
-- [ ] AC10: Verified on the VM at 3am with nobody connected, including the deliberate failure case where the automation session is locked and the run is expected to fail loudly. *(Partly: on 22 Sep 2026 a desktop sequence ran to completion in the automation account's unattended session, driven from the scheduler. What remains is the schedule firing on its own timer overnight.)*
+- [x] AC10: Verified on the VM at 3am with nobody connected, including the deliberate failure case where the automation session is locked and the run is expected to fail loudly. **Done, 22 Sep 2026:** the schedule fired on its own timer overnight with nobody signed in, and the desktop sequence ran to completion.
 
 ---
 
@@ -470,7 +470,7 @@
 - [x] AC10: On a machine with no inactivity limit the row reports "not needed" rather than failing, because nothing is going to lock that session and a red row would be a lie.
 - [x] AC6: A rejected input injection is logged rather than silently ignored, since that is what it looks like when the session locked anyway.
 - [x] AC7: Tested: no heartbeat warns, a stale heartbeat warns and says how long ago, a fresh one does not warn, and a disconnected session still reports that first.
-- [ ] AC8: Verified on the VM: the session is still unlocked more than an hour after boot with nobody connected, and a desktop schedule runs at 3am. *(Awaiting confirmation.)* *(Under test overnight 21-22 Sep 2026.)*
+- [x] AC8: Verified on the VM: the session is still unlocked more than an hour after boot with nobody connected, and a desktop schedule runs at 3am. *(Awaiting confirmation.)* **Done, 22 Sep 2026:** the session survived roughly eight hours unattended, about 32 times the 900-second inactivity limit, and the overnight desktop run passed.
 - [ ] AC9: The policy owner has been told this account defeats the inactivity limit, or the VM has been exempted instead. *(Not a code change; recorded so it is not quietly skipped.)*
 
 ---

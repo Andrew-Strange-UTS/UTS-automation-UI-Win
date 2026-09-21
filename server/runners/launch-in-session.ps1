@@ -255,7 +255,9 @@ function Start-InSession {
         [string]$Command,
         [string]$Directory,
         [bool]$WaitForExit,
-        [int]$TimeoutMs,
+        # uint32, not int: INFINITE is 0xFFFFFFFF, which overflows Int32 and
+        # would throw at parameter binding rather than waiting forever.
+        [uint32]$TimeoutMs,
         # Variations, so the diagnose mode can isolate which of these Windows
         # is objecting to. Defaults are exactly what production uses.
         [string]$ApplicationName = $null,

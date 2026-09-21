@@ -91,10 +91,44 @@ Write-Host "Installing Marvin"
 Write-Host "  from: $Source"
 Write-Host "  to:   $InstallDir"
 
+# The scheduler service runs FROM the install directory, so it has to be stopped
+# and unregistered before that directory can be replaced. It holds its own
+# executable and log files open; without this the copy fails part-way and leaves
+# a half-removed install behind.
+$existingService = Get-CimInstance Win32_Service -Filter "Name like 'marvin%'" -ErrorAction SilentlyContinue
+if ($existingService) {
+    Write-Host "Stopping the Marvin Scheduler service..."
+    Stop-Service -DisplayName "Marvin Scheduler" -ErrorAction SilentlyContinue
+
+    # Stop-Service returns before the wrapper has actually released its files.
+    $deadline = (Get-Date).AddSeconds(30)
+    while ((Get-Date) -lt $deadline) {
+        $state = (Get-Service -DisplayName "Marvin Scheduler" -ErrorAction SilentlyContinue).Status
+        if (-not $state -or $state -eq "Stopped") { break }
+        Start-Sleep -Milliseconds 500
+    }
+    Stop-Process -Name marvinscheduler -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+
+    # Unregister rather than reuse it: the registration records a script path,
+    # and reusing one that points at an old location is how a machine ends up
+    # running a service from somewhere that no longer exists. It is registered
+    # again, against this install, further down.
+    Write-Host "  unregistering $($existingService.Name) so it can be re-registered against this install"
+    & sc.exe delete $existingService.Name | Out-Null
+    Start-Sleep -Seconds 1
+}
+
 # Replace rather than merge, so files dropped between versions don't linger.
 if (Test-Path $InstallDir) {
     Write-Host "Removing the previous install..."
-    Remove-Item -Recurse -Force $InstallDir
+    try {
+        Remove-Item -Recurse -Force $InstallDir -ErrorAction Stop
+    } catch {
+        throw ("Could not replace $InstallDir : $($_.Exception.Message)`n" +
+               "Something still has a file open there. Close Marvin in every session, " +
+               "check the Marvin Scheduler service is stopped, then re-run.")
+    }
 }
 New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 Copy-Item -Path (Join-Path $Source "*") -Destination $InstallDir -Recurse -Force
@@ -132,6 +166,7 @@ if (-not $SkipService) {
 
     if (Test-Path $installService) {
         Write-Host "`nRegistering the Marvin Scheduler service..."
+        if ($existingService) { Write-Host "  (replacing the previous registration)" }
         Write-Host "  service script: $serviceScript"
         try {
             & node $installService --script $serviceScript

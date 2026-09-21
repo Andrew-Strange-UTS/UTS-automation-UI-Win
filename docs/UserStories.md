@@ -441,6 +441,22 @@
 
 ---
 
+### EPEA-TBD-14 — The service was registered against whoever installed it `3 pts`
+
+**Description:** `install-service-win.js` registered the `server` folder next to itself, so installing from a clone in a profile (`C:\Users\020144\UTS-win-automation-UI`) made the Windows service run from that profile. That survives a reinstall, so a new machine-wide install ends up talking to an old service, and the automation account added by EPEA-TBD-13 cannot read another user's profile at all. The published install instructions also had no uninstall path, and removing a node-windows service requires naming the same script path it was installed with.
+
+**Acceptance Criteria:**
+- [x] AC1: The script that registers the service takes an explicit `--script` path, falling back to the environment and then to the checkout beside it.
+- [x] AC2: `NODE_PATH` follows the registered script rather than the checkout, so a service registered against the install never depends on a clone.
+- [x] AC3: The uninstall script accepts the same flag, so a service registered from an old location can be removed.
+- [x] AC4: `deploy-win.ps1` registers the copy it just installed, not the one beside itself.
+- [x] AC5: The packaged app ships `scripts/`, so a VM has the service and automation-account tooling without a clone.
+- [x] AC6: Tested: flag beats environment beats checkout, `NODE_PATH` follows the script, and an old path can be named for uninstall.
+- [x] AC7: The published docs cover removing an older install, what must never be deleted (`secrets_master_key`), and how to check which copy owns the service.
+- [ ] AC8: Verified on the VM: after the reinstall, `PathName` points inside `C:\Program Files\Marvin`. *(Awaiting confirmation.)*
+
+---
+
 ## Secrets Management
 
 ### EPEA-2505 — User encrypted secrets store `8 pts`

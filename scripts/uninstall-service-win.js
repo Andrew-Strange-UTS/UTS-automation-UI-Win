@@ -4,6 +4,7 @@
 // Run: node scripts/uninstall-service-win.js
 
 const path = require("path");
+const { resolveSchedulerScript } = require("../server/utils/serviceScriptPath");
 
 let Service;
 try {
@@ -13,9 +14,19 @@ try {
   process.exit(1);
 }
 
+// node-windows derives the daemon directory from the script path, so an
+// uninstall has to name the same path the install used. To remove a service
+// registered from an old location, point this at it:
+//   node scripts\uninstall-service-win.js --script "C:\Users\someone\UTS-win-automation-UI\server\scheduler-service.js"
+const SCRIPT = resolveSchedulerScript({
+  argv: process.argv.slice(2),
+  env: process.env,
+  fallbackDir: path.resolve(__dirname, "../server"),
+});
+
 const svc = new Service({
   name: "Marvin Scheduler",
-  script: path.resolve(__dirname, "../server/scheduler-service.js"),
+  script: SCRIPT,
 });
 
 svc.on("uninstall", () => {
@@ -27,4 +38,5 @@ svc.on("error", (err) => {
 });
 
 console.log("Uninstalling Marvin Scheduler service...");
+console.log(`Service script: ${SCRIPT}`);
 svc.uninstall();

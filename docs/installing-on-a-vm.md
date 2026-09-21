@@ -65,6 +65,54 @@ Understanding this up front avoids surprises on a shared VM.
 > for your VM, restrict who can reach the app, and treat closing it as a
 > follow-up (it needs per-user schedule ownership).
 
+## Remove an older install first
+
+Do this before reinstalling, especially if Marvin was previously run from a
+**git clone in someone's profile** (for example
+`C:\Users\<you>\UTS-win-automation-UI`). That layout registers the scheduler
+service against that profile, so the service keeps running from there after a
+reinstall, and you end up with the new app talking to an old service.
+
+**Check what is actually registered before you remove anything:**
+
+```powershell
+Get-CimInstance Win32_Service -Filter "Name like 'marvin%'" | Select Name, StartName, PathName | Format-List
+```
+
+`PathName` tells you which copy owns the service. Then, from an **elevated**
+prompt:
+
+```powershell
+# 1. Stop it
+Stop-Service -DisplayName "Marvin Scheduler" -ErrorAction SilentlyContinue
+
+# 2. Remove it, naming the SAME script path it was installed with.
+#    node-windows derives the daemon directory from that path, so a service
+#    registered from a clone has to be removed from that clone (or by pointing
+#    --script at it).
+node scripts\uninstall-service-win.js --script "C:\Users\<you>\UTS-win-automation-UI\server\scheduler-service.js"
+
+# 3. Confirm it is gone
+Get-Service -DisplayName "Marvin Scheduler" -ErrorAction SilentlyContinue
+```
+
+If step 2 leaves a `server\daemon` folder behind in the old location, delete it.
+Then close Marvin in every session and delete the old app folder.
+
+**Do not delete `C:\ProgramData\uts-automation`.** It holds every schedule,
+the encrypted secrets, and `secrets_master_key`. Every secret ever stored, and
+every secret bundled into a schedule, is encrypted with that key and **cannot be
+recovered without it**. A reinstall is meant to leave that directory alone.
+
+What is safe to remove:
+
+| Path | Remove? |
+|---|---|
+| The old app folder or clone | Yes, after the service is unregistered |
+| `server\daemon` in the old location | Yes, if unregistering left it |
+| `%APPDATA%\Marvin` (per-user tests, sequences, secrets) | Only if you want that user to start clean |
+| `C:\ProgramData\uts-automation` | **No.** Losing the master key orphans every secret |
+
 ## Method 1: the NSIS installer (if it builds)
 
 If you have a working `Marvin Setup <version>.exe` (80 to 150 MB, not a few
@@ -118,10 +166,31 @@ node scripts\install-service-win.js
 ```
 
 It installs as the **Marvin Scheduler** Windows service, runs as LocalSystem,
-and stores its data in `C:\ProgramData\uts-automation`. To remove it:
+and stores its data in `C:\ProgramData\uts-automation`.
+
+**Register the installed copy, not the clone you are standing in.** The script
+registers the `server` folder next to itself unless told otherwise, so running
+it from a clone in your profile registers that clone. That service then runs
+from your profile: it breaks if the profile is removed, and the automation
+account that runs scheduled desktop tests cannot read another user's profile at
+all. `deploy-win.ps1` now passes the installed path for you. By hand it is:
 
 ```powershell
-node scripts\uninstall-service-win.js
+node scripts\install-service-win.js --script "C:\Program Files\Marvin\resources\app\server\scheduler-service.js"
+```
+
+Check what you ended up with:
+
+```powershell
+Get-CimInstance Win32_Service -Filter "Name like 'marvin%'" | Select Name, StartName, PathName | Format-List
+```
+
+`StartName` should be `LocalSystem` and `PathName` should point inside
+`C:\Program Files\Marvin`. To remove it, name the same path it was installed
+with:
+
+```powershell
+node scripts\uninstall-service-win.js --script "C:\Program Files\Marvin\resources\app\server\scheduler-service.js"
 ```
 
 Marvin also tries to start the service automatically if it finds it stopped, so
@@ -145,7 +214,7 @@ account that is signed in permanently:
 ```powershell
 # elevated
 powershell -ExecutionPolicy Bypass -File scripts\setup-automation-account.ps1 `
-  -AppDir "C:\Marvin" -DataDir "C:\ProgramData\uts-automation"
+  -AppDir "C:\Program Files\Marvin" -DataDir "C:\ProgramData\uts-automation"
 ```
 
 What it does:
@@ -186,9 +255,11 @@ process in the session rather than assuming it from the account existing. If it
 is red, the row names which of these is wrong.
 
 Why the install directory matters: the run executes as `marvin-auto`, so
-everything it loads has to be readable by that account. An install under
-`C:\Users\<someone>` is not. Install Marvin somewhere machine-wide, such as
-`C:\Marvin`.
+everything it loads, including `node_modules`, has to be readable by that
+account. A machine-wide install under `C:\Program Files\Marvin` already is,
+because Windows grants Users read and execute there. A clone under
+`C:\Users\<someone>` is not, and no amount of configuration will make it
+work.
 
 ## Verify the install
 
@@ -213,6 +284,19 @@ confirm:
    old version do not linger.
 3. Test data in `%APPDATA%\Marvin` and schedules in `C:\ProgramData\uts-automation`
    are left untouched by an upgrade.
+4. Confirm the service is still registered against the install and not an old
+   clone (`PathName` in the check above), and restart it so the new build is
+   what is actually running:
+
+   ```powershell
+   Restart-Service -DisplayName "Marvin Scheduler"
+   Invoke-RestMethod http://localhost:5050/api/health | Format-List
+   ```
+
+   `status` should be `ok` and `schedules` should be the number you expect. A
+   `degraded` status names the file it cannot read or write, which is the point:
+   a service that cannot reach its data directory used to report zero schedules
+   and look healthy.
 
 ## Troubleshooting
 

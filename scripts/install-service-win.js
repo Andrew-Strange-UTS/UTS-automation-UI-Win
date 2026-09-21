@@ -4,6 +4,7 @@
 // Run: node scripts/install-service-win.js
 
 const path = require("path");
+const { resolveSchedulerScript, nodeModulesFor } = require("../server/utils/serviceScriptPath");
 
 let Service;
 try {
@@ -13,13 +14,24 @@ try {
   process.exit(1);
 }
 
+// Point the service at the machine-wide install, not at whatever clone this
+// script happens to sit in:
+//   node scripts\install-service-win.js --script "C:\Program Files\Marvin\resources\app\server\scheduler-service.js"
+// A service registered from a user profile dies with that profile, and the
+// automation account cannot read another user's profile at all.
+const SCRIPT = resolveSchedulerScript({
+  argv: process.argv.slice(2),
+  env: process.env,
+  fallbackDir: path.resolve(__dirname, "../server"),
+});
+
 const svc = new Service({
   name: "Marvin Scheduler",
   description: "Runs scheduled test sequences for Marvin. Shared across all users.",
-  script: path.resolve(__dirname, "../server/scheduler-service.js"),
+  script: SCRIPT,
   env: [
     { name: "UTS_SCHEDULER_PORT", value: "5050" },
-    { name: "NODE_PATH", value: path.resolve(__dirname, "../server/node_modules") },
+    { name: "NODE_PATH", value: nodeModulesFor(SCRIPT) },
   ],
 });
 
@@ -42,5 +54,6 @@ svc.on("error", (err) => {
   console.error("Error:", err);
 });
 
-console.log("Installing Marvin Scheduler as a Windows Service...");
+console.log(`Installing Marvin Scheduler as a Windows Service...`);
+console.log(`Service script: ${SCRIPT}`);
 svc.install();

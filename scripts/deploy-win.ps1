@@ -116,14 +116,25 @@ Write-Host "  $commonDesktop\Marvin.lnk"
 Write-Host "  $commonPrograms\Marvin.lnk"
 
 if (-not $SkipService) {
-    # scripts/ is not in the electron-builder `files` list, so it is not inside
-    # win-unpacked. The copy next to this script is the one that normally exists.
     $installService = Join-Path $scriptDir "install-service-win.js"
+
+    # Register the service against the copy of the server we just installed,
+    # not the one next to this script. A service registered from a clone in
+    # someone's profile keeps running from that profile: it dies with the
+    # profile, and the automation account that runs scheduled desktop tests
+    # cannot read another user's profile at all.
+    $serviceScript = Join-Path $InstallDir "resources\app\server\scheduler-service.js"
+    if (-not (Test-Path $serviceScript)) {
+        # Older layouts kept the server directly under resources/.
+        $alternative = Join-Path $InstallDir "resources\server\scheduler-service.js"
+        if (Test-Path $alternative) { $serviceScript = $alternative }
+    }
 
     if (Test-Path $installService) {
         Write-Host "`nRegistering the Marvin Scheduler service..."
+        Write-Host "  service script: $serviceScript"
         try {
-            & node $installService
+            & node $installService --script $serviceScript
         } catch {
             Write-Warning "Scheduler service registration failed: $_"
             Write-Warning "Run 'node scripts\install-service-win.js' manually from an elevated prompt."

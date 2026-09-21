@@ -20,7 +20,8 @@ Scale reporting, secrets management, and encrypted schedule bundles.
 - [How to: Zephyr reporting](how-to-zephyr.html): connect Marvin to Zephyr Scale
   and post results to a test cycle.
 - [How to: Schedules](how-to-schedules.html): run test sequences on a timetable
-  with the scheduler service.
+  with the scheduler service, including what scheduled *desktop* tests need that
+  web tests do not.
 - [Building and Installing](building-and-installing.html): build the Windows
   installer (`.exe`) and the packaging details, for developers.
 - [Installing on a VM](installing-on-a-vm.html): deploy Marvin to one or more

@@ -476,6 +476,24 @@
 
 ---
 
+### EPEA-TBD-16 — Defender blocks Marvin a day or two after every unsigned build `5 pts`
+
+**Description:** On 23 Sep 2026 both users on the VM found Marvin would no longer launch: "Windows cannot access the specified device, path, or file. You may not have the appropriate permissions", unchanged by running as administrator. It was Defender's Attack Surface Reduction rule `01443614-CD74-433A-B99E-2ECDC07BFC25`, which blocks unsigned, low-prevalence executables. A freshly built Marvin.exe is exactly that, so it runs until its cloud reputation settles and is then blocked, with an error that blames permissions and sends people to the wrong place. The same rule applies to `marvinscheduler.exe` inside the install directory, so a reboot could have stopped every schedule with no warning.
+
+**Acceptance Criteria:**
+- [x] AC1: `deploy-win.ps1` applies the ASR exclusion for the install directory after each install, and verifies it actually landed rather than assuming the call worked.
+- [x] AC2: When a managed policy discards or refuses the exclusion, the deploy says so, gives the exact command, and states that IT has to apply it.
+- [x] AC3: A startup check reports the rule's mode and whether an exclusion covers the install directory, and goes red when the rule is enforcing and nothing does.
+- [x] AC4: Warn mode (6) is treated as blocking, because a server session has no notification UI to click and it behaves as a hard block.
+- [x] AC5: The row's hint carries the exact `Add-MpPreference` command, says to exclude the whole folder because the service's executable is in it, and names code signing as the durable fix.
+- [x] AC6: Settings that cannot be read are reported as unknown, never as fine: "ok" here means "this will still start tomorrow", which is not something to guess at.
+- [x] AC7: Tested against the real `Get-MpPreference` output captured from the VM, including that ids and actions are paired by position and that an exclusion covers paths beneath it.
+- [x] AC8: Documented on the site: symptom, how to confirm with event 1121, the fix, why warn counts as blocking, why it recurs, and the signing answer.
+- [ ] AC9: Verified on the VM: the deploy applies the exclusion by itself, and the Defender row is green. *(Awaiting confirmation.)*
+- [ ] AC10: Confirmed the exclusion survives a policy refresh and a reboot, or raised with IT to apply centrally. *(Awaiting confirmation.)*
+
+---
+
 ## Secrets Management
 
 ### EPEA-2505 — User encrypted secrets store `8 pts`

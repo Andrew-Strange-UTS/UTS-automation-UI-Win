@@ -108,6 +108,16 @@ export default function StartupChecks({ onDismiss }) {
       feature: "Desktop tests (Windows only)",
     },
     {
+      // Marvin is running, so it was not blocked this time. This row is about
+      // whether it will start next time: the rule bites a day or two after a
+      // new build, and can stop the scheduler service at the next reboot.
+      label: "Defender (ASR)",
+      check: checks.defenderAsr || { ok: true, version: "Not checked" },
+      info: (checks.defenderAsr || {}).detail,
+      required: false,
+      feature: "Launching Marvin and the scheduler service",
+    },
+    {
       label: "Scheduler Service",
       check: checks.scheduler,
       info: checks.scheduler.ok

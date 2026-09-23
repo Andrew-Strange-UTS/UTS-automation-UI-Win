@@ -7,6 +7,7 @@ const os = require("os");
 const path = require("path");
 const { getChromeBinary, getChromeVersion, isSnapChromium } = require("../utils/chromeFinder");
 const schedulerService = require("../utils/schedulerService");
+const { checkAsr } = require("../utils/defenderAsr");
 const router = express.Router();
 
 // Run a command and resolve with { ok, version/detail }
@@ -161,6 +162,24 @@ router.get("/", async (req, res) => {
     };
   }
 
+  // --- Defender ASR (EPEA-TBD-16) ---
+  // Marvin is unsigned, so Defender's prevalence rule starts blocking it a day
+  // or two after each new build, with a shell error that blames permissions.
+  // The same rule can stop the scheduler service's wrapper at the next reboot,
+  // which would stop schedules with no warning at all.
+  if (isWindows) {
+    const asr = await checkAsr();
+    checks.defenderAsr = {
+      ok: asr.ok,
+      version: asr.ok ? asr.cause : undefined,
+      detail: asr.cause,
+      hint: asr.hint,
+      installDir: asr.installDir,
+    };
+  } else {
+    checks.defenderAsr = { ok: true, version: "Not applicable on this OS" };
+  }
+
   // --- Session keep-alive (EPEA-TBD-15) ---
   // Its own row, because it fails on its own: the session can be healthy while
   // the only thing stopping it from locking has been dead for an hour. On a
@@ -192,6 +211,8 @@ router.get("/", async (req, res) => {
     // Available now, but not for long if the session is about to lock.
     desktopSchedulesStayAvailable: isWindows && checks.desktopSession.ok && checks.sessionKeepAwake.ok,
     gitClone: checks.git.ok,
+    // Marvin starts today; this says whether it will still start tomorrow.
+    launchesAfterReboot: checks.defenderAsr.ok,
     zephyrReporting: true, // Always available if secrets are configured
   };
 

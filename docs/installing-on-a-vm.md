@@ -545,6 +545,86 @@ In order of preference:
 Until one of those is in place, **scheduled web tests still work normally**.
 Only desktop schedules depend on the session.
 
+### Windows Defender blocks Marvin ("Windows cannot access the specified device, path, or file")
+
+**Symptom.** Marvin launched fine for a day or two, then every user gets:
+
+> `C:\Program Files\Marvin\Marvin.exe`
+> Windows cannot access the specified device, path, or file. You may not have
+> the appropriate permissions to access the item.
+
+Running as administrator changes nothing, and the file's permissions are fine.
+It is not a permissions problem, despite what the message says.
+
+**Cause.** Microsoft Defender **Attack Surface Reduction**, specifically
+*"Block executable files from running unless they meet a prevalence, age, or
+trusted list criterion"* (`01443614-CD74-433A-B99E-2ECDC07BFC25`). Marvin is
+**unsigned**, and a newly built executable has no prevalence and no age, so once
+Microsoft's cloud reputation settles the rule starts blocking it. That is why it
+works for a day or two after each deploy and then stops.
+
+**Confirm it** (elevated):
+
+```powershell
+Get-WinEvent -LogName "Microsoft-Windows-Windows Defender/Operational" -MaxEvents 30 |
+  Where-Object { $_.Id -eq 1121 } | Select-Object TimeCreated, Message | Format-List
+```
+
+Event **1121** naming `Marvin.exe` and that rule ID confirms it. Event 1122 is
+the audit-only equivalent, which does not block.
+
+Check the rule's mode and the current exclusions:
+
+```powershell
+(Get-MpPreference).AttackSurfaceReductionRules_Ids
+(Get-MpPreference).AttackSurfaceReductionRules_Actions   # 1=Block 2=Audit 6=Warn
+(Get-MpPreference).AttackSurfaceReductionOnlyExclusions
+```
+
+The two arrays are positional: find the prevalence rule's index in the first and
+read the same index in the second. **Treat warn (6) as blocking.** Warn is meant
+to show a notification with an "Unblock" button, but a server session has no
+notification UI to click, so it behaves as a hard block with a misleading error.
+
+**Fix** (elevated):
+
+```powershell
+Add-MpPreference -AttackSurfaceReductionOnlyExclusions "C:\Program Files\Marvin"
+```
+
+Exclude the **whole folder**, not just `Marvin.exe`. The install also contains
+`chromedriver.exe`, `node.exe` and the scheduler service's own
+`marvinscheduler.exe`. That last one matters most: blocked, the service will not
+start at the next reboot and **every schedule silently stops**.
+
+`deploy-win.ps1` now applies this exclusion after each install and verifies it
+landed, so in normal use you should not need to run it by hand.
+
+**If the exclusion will not stick.** Defender may be centrally managed, in which
+case the command is accepted and discarded, or refused outright by tamper
+protection. Then no local administrator can override it and IT must apply the
+exclusion through Intune or GPO. Check it survives a policy refresh:
+
+```powershell
+gpupdate /force
+(Get-MpPreference).AttackSurfaceReductionOnlyExclusions
+```
+
+**Does it recur?** The exclusion is by **path**, not by file hash, so rebuilding
+and redeploying to the same directory stays covered. It comes back only if a
+policy refresh removes the exclusion, or if Marvin is installed somewhere else.
+
+**The durable fix is code signing.** A signed binary from a trusted publisher
+satisfies the rule's "trusted list" criterion, so it is no longer treated as
+unknown and usually needs no exclusion at all. See
+[Building and Installing](building-and-installing.html) for the signing steps.
+
+**Marvin checks this for you.** The startup screen has a **Defender (ASR)** row.
+It reads the rule's mode and whether an exclusion covers the install directory,
+and goes red with the exact command when the rule is enforcing and nothing
+covers it. Marvin running today does not mean it will start tomorrow, which is
+the whole point of the row.
+
 ### Verify the install
 
 Log in as a **second, non-administrator user** (this is the real test of a
@@ -607,40 +687,10 @@ setting the environment variable `UTS_POWERSHELL_SESSION=0`, but you should not
 need to.
 
 **"Windows cannot access the specified device, path, or file" when launching
-Marvin.** Windows is being blocked from running `Marvin.exe`. On a managed
-machine this is usually **Microsoft Defender Attack Surface Reduction (ASR)**,
-specifically the rule **"Block executable files from running unless they meet a
-prevalence, age, or trusted list criterion"** (rule ID
-`01443614-CD74-433A-B99E-2ECDC07BFC25`). It blocks Marvin because the executable
-is **unsigned and low-prevalence** (Microsoft's cloud has not seen it on enough
-machines to trust it). Classic symptom: it launches fine for a day or two, then
-starts being blocked every time as the cloud reputation settles.
-
-Confirm it on the machine (elevated):
-
-```powershell
-Get-WinEvent -LogName "Microsoft-Windows-Windows Defender/Operational" -MaxEvents 30 |
-  Where-Object { $_.Id -eq 1121 } | Select-Object TimeCreated, Message | Format-List
-```
-
-Event **1121** naming `Marvin.exe` and that rule ID is the confirmation (the file
-and its `Users:(RX)` permissions are fine; it is purely the ASR rule).
-
-This rule is centrally managed, so no local user or admin can override it, **IT
-must act**:
-
-- **Immediate:** add an ASR exclusion for the whole install folder (not just the
-  exe, so bundled binaries like `chromedriver.exe` are covered too):
-
-  ```powershell
-  Add-MpPreference -AttackSurfaceReductionOnlyExclusions "C:\Program Files\Marvin"
-  ```
-
-  (applied via Intune / GPO, or locally if tamper protection allows).
-- **Durable:** **code-sign the app** (see Building and Installing, code signing).
-  A signed binary from a trusted publisher satisfies the rule's "trusted list"
-  criterion, so it is no longer treated as unknown, and usually removes the need
-  for a per-path exclusion.
+Marvin.** Defender's ASR prevalence rule is blocking the unsigned executable.
+See [Windows Defender blocks Marvin](#windows-defender-blocks-marvin-windows-cannot-access-the-specified-device-path-or-file)
+above for how to confirm it, the one-line fix, and why it recurs after a new
+build.
 
 **Git or Node "not found" errors when running a test, or repo pulls fail for
 some users but not others.** Node or Git was installed **"just me"** on one

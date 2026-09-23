@@ -249,6 +249,16 @@ With the run finally executing in the session, the first step that compiled C# f
 `stripUserEnvironment` now removes the variables that describe *who* is running (`TEMP`, `TMP`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `HOMEDRIVE`, `HOMEPATH`, `USERNAME`, `USERDOMAIN`, `LOGONSERVER`, `SESSIONNAME`) from what `run.cmd` carries, keeping only what describes *what* is being run, such as `NODE_PATH`. Case-insensitive, because Windows variable names are. Three tests, including one asserting `run.cmd` sets `NODE_PATH` and never `TEMP`.
 - `server/utils/sessionLauncher.js`, `server/utils/sessionLauncher.test.js`
 
+### EPEA-TBD-16 — Defender blocks Marvin a day or two after every unsigned build
+`server/utils/defenderAsr.js` keeps the judgement separate from the PowerShell, so it can be tested against the real `Get-MpPreference` output captured from the VM. `AttackSurfaceReductionRules_Ids` and `_Actions` are two parallel arrays matched by position, so the rule's mode is read by index rather than by assuming an order; the fixture in the tests is the VM's actual sixteen rules, where the prevalence rule sat first with action 6. Warn (6) is treated as blocking alongside block (1), because warn is only meant to be survivable when there is a notification UI to click "Unblock" in, and a server session has none: it presents as a hard block with a message about permissions. Exclusion matching is case-insensitive, tolerates trailing separators, covers everything beneath an excluded directory (which is what protects `marvinscheduler.exe`), and refuses a partial-name match so `...\Marvin2` never reads as covering `...\Marvin`. Settings that cannot be read report `unknown` and fail the check, because "ok" here means "this will still start tomorrow".
+
+`routes/health.js` adds a `defenderAsr` check and a `launchesAfterReboot` feature flag, and `StartupChecks.jsx` shows a **Defender (ASR)** row above the scheduler rows. The row exists precisely because Marvin running right now proves nothing: the rule bites a day or two after a build, and can stop the service at the next reboot.
+
+`deploy-win.ps1` applies `Add-MpPreference -AttackSurfaceReductionOnlyExclusions <InstallDir>` after each install and then **re-reads the list to confirm it landed**, since a centrally managed policy accepts the call and discards it. On failure it prints the exact command and says IT must apply it. The exclusion is by path, so it covers every future build in that directory rather than needing to be redone per version.
+
+Covered by `server/utils/defenderAsr.test.js` (13 `node --test` cases).
+- `server/utils/defenderAsr.js`, `server/utils/defenderAsr.test.js`, `server/routes/health.js`, `renderer/src/components/StartupChecks.jsx`, `scripts/deploy-win.ps1`, `docs/installing-on-a-vm.md`
+
 ### EPEA-TBD-15 — A machine inactivity limit locks the automation session
 `server/runners/keep-session-awake.ps1` injects a **zero-distance** mouse move (`SendInput`, `dx=0, dy=0`, `MOUSEEVENTF_MOVE`) every four minutes. Windows counts it as input and resets the idle timer, but the cursor does not move, so it cannot disturb a test that is driving the mouse at that moment; a one-pixel jiggle would, and would produce flaky failures that look like bad tests. A rejected injection is logged rather than ignored, because that is what it looks like when the session locked anyway.
 

@@ -179,5 +179,31 @@ if (-not $SkipService) {
     }
 }
 
+# Defender's prevalence ASR rule blocks unsigned, low-prevalence executables.
+# Every new build is exactly that, so Marvin starts for a day or two and is then
+# blocked with "Windows cannot access the specified device, path, or file",
+# which reads as a permissions problem and is not one. The exclusion is by path,
+# so re-applying it here covers every future build in this directory, and the
+# whole folder is excluded because the scheduler service's own executable lives
+# inside it: blocked, that stops schedules at the next reboot.
+Write-Host "`nExcluding the install directory from Defender's ASR prevalence rule..."
+try {
+    Add-MpPreference -AttackSurfaceReductionOnlyExclusions $InstallDir -ErrorAction Stop
+
+    # Verify rather than assume: a centrally managed policy can accept the call
+    # and discard it.
+    $applied = @((Get-MpPreference).AttackSurfaceReductionOnlyExclusions)
+    if ($applied -contains $InstallDir) {
+        Write-Host "  excluded: $InstallDir"
+    } else {
+        Write-Warning "The exclusion did not persist, so Defender's policy is centrally managed."
+        Write-Warning "Ask IT to exclude $InstallDir via Intune or GPO, or Marvin will stop launching within a day or two."
+    }
+} catch {
+    Write-Warning "Could not add the Defender exclusion: $($_.Exception.Message)"
+    Write-Warning "From an elevated prompt, or via IT if tamper protection blocks it:"
+    Write-Warning "  Add-MpPreference -AttackSurfaceReductionOnlyExclusions `"$InstallDir`""
+}
+
 Write-Host "`nDone. Marvin is installed for all users at $InstallDir"
 Write-Host "Reminder: Git must be on the PATH for test repo cloning to work."

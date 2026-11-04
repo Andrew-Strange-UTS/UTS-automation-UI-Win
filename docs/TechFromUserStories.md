@@ -249,6 +249,18 @@ With the run finally executing in the session, the first step that compiled C# f
 `stripUserEnvironment` now removes the variables that describe *who* is running (`TEMP`, `TMP`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `HOMEDRIVE`, `HOMEPATH`, `USERNAME`, `USERDOMAIN`, `LOGONSERVER`, `SESSIONNAME`) from what `run.cmd` carries, keeping only what describes *what* is being run, such as `NODE_PATH`. Case-insensitive, because Windows variable names are. Three tests, including one asserting `run.cmd` sets `NODE_PATH` and never `TEMP`.
 - `server/utils/sessionLauncher.js`, `server/utils/sessionLauncher.test.js`
 
+### EPEA-TBD-17: Start the automation session for a run, and log it off afterwards
+Not started. Waiting on the AC1 spike and on VM team sign-off (EPEA-TBD-19 AC2). Planned: `launch-in-session.ps1` gains `start` and `logoff` modes; the service opens a loopback RDP session to `127.0.0.2` using the password from a Marvin-named LSA secret, waits for the existing probe, runs, then logs off with `WTSLogoffSession`. Session usage is reference-counted in the scheduler, because `runningProcesses` in `server/scheduler.js` is keyed per schedule and different schedules can run at the same time.
+- Expected: `scripts/setup-automation-account.ps1`, `server/runners/launch-in-session.ps1`, `server/utils/sessionLauncher.js`, `server/scheduler.js`, tests alongside
+
+### EPEA-TBD-18: Startup checks for an on-demand session, and removing the keep-alive
+Not started.
+- Expected: `server/utils/sessionLauncher.js`, `server/utils/schedulerService.js`, `server/routes/health.js`, `renderer/src/components/StartupChecks.jsx`; removes `server/runners/keep-session-awake.ps1`
+
+### EPEA-TBD-19: Documentation and VM team sign-off for on-demand sessions
+Not started.
+- Expected: `docs/installing-on-a-vm.md`
+
 ### EPEA-TBD-16 — Defender blocks Marvin a day or two after every unsigned build
 `server/utils/defenderAsr.js` keeps the judgement separate from the PowerShell, so it can be tested against the real `Get-MpPreference` output captured from the VM. `AttackSurfaceReductionRules_Ids` and `_Actions` are two parallel arrays matched by position, so the rule's mode is read by index rather than by assuming an order; the fixture in the tests is the VM's actual sixteen rules, where the prevalence rule sat first with action 6. Warn (6) is treated as blocking alongside block (1), because warn is only meant to be survivable when there is a notification UI to click "Unblock" in, and a server session has none: it presents as a hard block with a message about permissions. Exclusion matching is case-insensitive, tolerates trailing separators, covers everything beneath an excluded directory (which is what protects `marvinscheduler.exe`), and refuses a partial-name match so `...\Marvin2` never reads as covering `...\Marvin`. Settings that cannot be read report `unknown` and fail the check, because "ok" here means "this will still start tomorrow".
 

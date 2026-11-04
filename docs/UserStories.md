@@ -428,8 +428,8 @@
 
 **Acceptance Criteria:**
 - [x] AC1: The service launches a desktop run into the automation account's interactive session (`WTSQueryUserToken` → `DuplicateTokenEx` → `CreateEnvironmentBlock` → `CreateProcessAsUser`, desktop `winsta0\default`), implemented as PowerShell P/Invoke with no native module. *(Built end to end: the scheduler now routes desktop runs through the launcher, with the run log streamed back from a file and Stop going through taskkill. Unverified against real Windows until the VM.)* **Verified on the VM:** a process now starts in session 1 after the diagnose run showed an explicit application name and working directory are both required.
-- [ ] AC2: The automation account is local only: not a domain account, denied network logon and denied Remote Desktop logon, and hidden from the sign-in screen's user list. *(Built in `scripts/setup-automation-account.ps1`: local account, never added to Administrators, denied network and Remote Desktop logon via secedit, hidden from the sign-in list. Unverified until the VM.)*
-- [x] AC3: Nobody can sign in as that account. Its password is generated at install from a CSPRNG, written only to the LSA secret, never displayed, never written to disk and never placed in Marvin's secrets store. *(Built: 48 random bytes from a CSPRNG, written to the LSA secret and discarded, never printed or stored. The account file holds a name only, asserted by test.)* **Verified on the VM:** the account was created, autologon signed it in at boot, and no password was ever displayed or stored.
+- [ ] AC2: *(Superseded by EPEA-TBD-17: the account now needs the Remote Desktop logon right.)* The automation account is local only: not a domain account, denied network logon and denied Remote Desktop logon, and hidden from the sign-in screen's user list. *(Built in `scripts/setup-automation-account.ps1`: local account, never added to Administrators, denied network and Remote Desktop logon via secedit, hidden from the sign-in list. Unverified until the VM.)*
+- [x] AC3: *(Superseded by EPEA-TBD-17: the service now keeps the password in a SYSTEM-only LSA secret.)* Nobody can sign in as that account. Its password is generated at install from a CSPRNG, written only to the LSA secret, never displayed, never written to disk and never placed in Marvin's secrets store. *(Built: 48 random bytes from a CSPRNG, written to the LSA secret and discarded, never printed or stored. The account file holds a name only, asserted by test.)* **Verified on the VM:** the account was created, autologon signed it in at boot, and no password was ever displayed or stored.
 - [x] AC4: The no-lock, no-screensaver and no-inactivity-timeout settings are applied to that account's profile alone (per-user settings, not the machine-wide inactivity policy) and provably do not change any other user's session on the VM. *(Built: written under that account's hive only. The machine-wide inactivity limit is reported as a warning and deliberately not changed.)* **Verified on the VM:** `lockSettingsApplied: true` once the profile existed.
 - [x] AC5: Marvin's startup check shows a green tick only when a usable session for the automation account actually exists: present, unlocked and able to accept input. It proves this by launching a probe process into that session, not by inferring it from the account existing. *(Built and unit-tested end to end in JS, including the Desktop Session row in the UI. The PowerShell half cannot run off Windows, so it stays unchecked until the VM.)* **Verified on the VM:** both rows green on the startup screen.
 - [x] AC6: The startup check goes red with a named cause for each distinct failure: no session, session locked, wrong account logged on, and token acquisition denied. *(All reason codes carry their own cause and fix, asserted distinct by test. Unverified against real Windows until the VM.)* **Verified on the VM:** `not-configured`, `no-session` (naming the ten other accounts signed in), `launch-failed` with its Win32 code, and finally `ok` were all observed in turn.
@@ -438,7 +438,7 @@
 - [ ] AC9: Password recovery is documented as "reset the account and re-run the setup step", since no copy is kept anywhere. *(Documented in `docs/installing-on-a-vm.md` and in the script header.)*
 - [x] AC11: Everything a scheduled desktop run needs to read is readable by the automation account: the per-run temp directory, the runners and utils, and `node_modules`. The shared schedule store, the encrypted secrets and the master key stay restricted to SYSTEM and Administrators. *(Per-path grants built and tested, applied by the service at startup. Needs the machine-wide install to cover `node_modules`.)* **Verified on the VM:** `runDirectoryAccessGranted: true`, and the keep-alive writes to the run directory.
 - [x] AC10: Verified on the VM at 3am with nobody connected. **Done, 22 Sep 2026:** the schedule fired on its own timer overnight with nobody signed in, and the desktop sequence ran to completion.
-- [ ] AC12: The deliberate failure case: with the automation session locked, a desktop schedule fails loudly naming the lock, rather than failing every step with "Access is denied". *(Split out of AC10, which claimed it without testing it.)*
+- [ ] AC12: *(Replaced by EPEA-TBD-17 AC9.)* The deliberate failure case: with the automation session locked, a desktop schedule fails loudly naming the lock, rather than failing every step with "Access is denied". *(Split out of AC10, which claimed it without testing it.)*
 
 ---
 
@@ -459,6 +459,8 @@
 ---
 
 ### EPEA-TBD-15 — A machine inactivity limit locks the automation session `3 pts`
+
+**Superseded by EPEA-TBD-18 (5 Nov 2026):** sessions now exist only for a run, so the keep-alive is being removed.
 
 **Description:** The VM applies "Interactive logon: Machine inactivity limit" at 900 seconds. It applies to every session, including the automation account's, and the per-user settings from EPEA-TBD-13 do not override it. Input cannot be sent to a locked desktop, so fifteen minutes after the last input every scheduled desktop run fails. It cannot be recovered either: the account's password is written to the LSA secret and discarded by design, so nothing holds a credential that could unlock the session, and only a reboot brings it back through autologon. Exempting the VM is the right fix and is somebody else's decision, so Marvin also ships a keep-alive.
 
@@ -491,6 +493,47 @@
 - [x] AC8: Documented on the site: symptom, how to confirm with event 1121, the fix, why warn counts as blocking, why it recurs, and the signing answer.
 - [ ] AC9: Verified on the VM: the deploy applies the exclusion by itself, and the Defender row is green. *(Awaiting confirmation.)*
 - [ ] AC10: Confirmed the exclusion survives a policy refresh and a reboot, or raised with IT to apply centrally. *(Awaiting confirmation.)*
+
+### EPEA-TBD-17: Start the automation session for a run, and log it off afterwards `13 pts`
+
+**Description:** The VM team does not allow a VM configured for automatic logon whose signed-in desktop is reachable from the VMware console (5 Nov 2026). EPEA-TBD-13 depended on autologon to keep the automation account signed in permanently. Instead, the scheduler service now opens a session only for a desktop run, by making an RDP connection from the VM to itself (`127.0.0.2`) as the automation account, and logs it off when the run ends. That session is never the console session, so the VMware console shows the sign-in screen throughout. Everything downstream (the session token, `CreateProcessAsUser`, the probe) is unchanged.
+
+**Security trade-off, agreed with the VM team under EPEA-TBD-19:** the service now has to hold the account's password so it can log on each time, and the account needs the Remote Desktop logon right, because a loopback RDP session is a Remote Desktop logon. It stays denied network logon, hidden from the sign-in screen, and no person knows the password.
+
+**Acceptance Criteria:**
+- [ ] AC1: Spike, done before anything else. From the service in Session 0, open a loopback RDP session as the account with no client window visible, and prove that SendKeys, screen capture and OCR work in it. The spike must also settle three questions: which RDP client is used (`mstsc` or a bundled FreeRDP); that the password reaches the client without appearing on a process command line or in a second credential store; and that screen capture is not blanked because the client has no visible window. Record the result. If any of these fails, stop and take it back to the user.
+- [ ] AC2: Autologon is removed. The setup script no longer sets `AutoAdminLogon`, and clears `DefaultUserName`, `DefaultDomainName` and the `DefaultPassword` LSA secret. Re-running it on an existing VM migrates it and logs off the autologon session that is already there.
+- [ ] AC3: The password is generated from a CSPRNG and stored in an LSA secret under Marvin's own key name, readable only by SYSTEM. It is never displayed, never written to disk and never placed in Marvin's secrets store.
+- [ ] AC4: Before a schedule with desktop steps runs, the service starts the session and waits until the existing probe reports `ok`. If the session is not usable within a time limit, the run fails with a named reason (for example RDP refused, logon failed, or probe timed out) and notifies through the existing ntfy/Teams channels.
+- [ ] AC5: The session is logged off after every outcome the service survives: pass, fail, Stop and timeout. This is checked with `query session`, not assumed from the call having returned.
+- [ ] AC6: When the service starts, and before each run, it logs off any automation account session it is not currently using. This covers a service crash or a reboot mid-run, where AC5 cannot run.
+- [ ] AC7: Web-only schedules never start a session, and behave exactly as before.
+- [ ] AC8: Desktop schedules that overlap share one session, which is logged off when the last of them finishes. A schedule starting while another's session is being logged off waits for that and then starts a new one.
+- [ ] AC9: If the session locks during a run, that run fails naming the lock, not with "Access is denied" on every step, and the next run gets a fresh session. (Replaces EPEA-TBD-13 AC12.)
+- [ ] AC10: Tested end to end on the VM: an overnight desktop schedule passes with nobody connected; while it runs, the VMware console shows the sign-in screen (confirmed by the VM team, who have console access); and afterwards no automation account session exists.
+
+---
+
+### EPEA-TBD-18: Startup checks for an on-demand session, and removing the keep-alive `5 pts`
+
+**Description:** The Desktop Session row currently goes green only when the automation account is already signed in. Under EPEA-TBD-17 it is normally not signed in, so that would be red all day. The keep-alive from EPEA-TBD-15 also goes: each run gets a fresh session, so nothing sits idle long enough for the inactivity limit to matter.
+
+**Acceptance Criteria:**
+- [ ] AC1: The Desktop Session row reports, without starting anything, whether an on-demand session is possible: the account exists, its stored credential is present, it holds the Remote Desktop logon right, and autologon is **not** configured. Having no automation account session is the normal state and is not an error.
+- [ ] AC2: The row has a "Test session" action that starts a real session, probes it and logs it off, and reports how long that took. It is never run automatically when the app starts, because it takes tens of seconds and creates a logon.
+- [ ] AC3: The keep-alive is removed: the script, its scheduled task (the setup script unregisters it on an existing VM), its heartbeat reading and its startup row.
+- [ ] AC4: Tested: each reason the row can be red has its own cause and fix, and an existing autologon configuration is reported as red, since it is the thing the VM team has ruled out.
+
+---
+
+### EPEA-TBD-19: Documentation and VM team sign-off for on-demand sessions `2 pts`
+
+**Description:** The on-demand session swaps one security trade-off for another. That is the VM team's decision to make, and the install guide currently tells people to set up autologon.
+
+**Acceptance Criteria:**
+- [ ] AC1: `docs/installing-on-a-vm.md` describes the on-demand model, including migrating a VM that currently uses autologon. Every instruction to set up autologon or the keep-alive is removed.
+- [ ] AC2: The VM team has agreed to the service holding the account's password in a SYSTEM-only LSA secret and to the account holding the Remote Desktop logon right. *(Not a code change. Recorded so it is not quietly skipped.)*
+- [ ] AC3: The VM team has confirmed that the automation account's RDP session does not need a Remote Desktop licence (CAL) they do not have, or that one is available.
 
 ---
 

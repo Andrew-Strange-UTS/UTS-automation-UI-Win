@@ -13,6 +13,44 @@ function StatusBadge({ ok, warn }) {
   return <span style={{ fontSize: "18px" }}>{ok ? STATUS_ICONS.pass : STATUS_ICONS.fail}</span>;
 }
 
+// Starts a real automation session, probes it and logs it off (EPEA-TBD-18 AC2).
+// A button, never automatic: it is a logon, and it takes tens of seconds.
+function SessionTest() {
+  const [state, setState] = useState({ running: false, result: null });
+
+  const run = () => {
+    setState({ running: true, result: null });
+    fetch(`${BACKEND_URL}/api/health/session-test`, { method: "POST" })
+      .then((res) => res.json())
+      .then((result) => setState({ running: false, result }))
+      .catch((err) => setState({ running: false, result: { ok: false, cause: err.message } }));
+  };
+
+  const { running, result } = state;
+  let summary = null;
+  if (result && result.ok) {
+    summary = result.sharedWithRun
+      ? `Session ${result.sessionId} works (ready in ${result.readySeconds}s). A run is using it, so it was left open.`
+      : `Session ${result.sessionId} started, answered in ${result.readySeconds}s, and was ${result.loggedOff ? "logged off" : "NOT logged off"}.`;
+  } else if (result) {
+    summary = `Failed: ${result.cause || result.reason || "unknown reason"}`;
+  }
+
+  return (
+    <div style={{ marginTop: "6px" }}>
+      <button onClick={run} disabled={running} style={{ ...smallBtnStyle, opacity: running ? 0.6 : 1 }}>
+        {running ? "Starting a session..." : "Test session"}
+      </button>
+      {summary && (
+        <div style={{ marginTop: "4px", fontSize: "12px", color: result.ok && result.loggedOff !== false ? "#16a34a" : "#dc2626" }}>
+          {summary}
+          {!result.ok && result.hint && <div style={{ color: "#8a5300" }}>{result.hint}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function StartupChecks({ onDismiss }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -137,17 +175,6 @@ export default function StartupChecks({ onDismiss }) {
       required: false,
       feature: "Scheduled desktop tests",
     },
-    {
-      // Separate from the session row: this fails on its own, and when it does
-      // the session still looks healthy right up until it locks. A locked
-      // session cannot be unlocked, so this has to be visible beforehand.
-      label: "Session Keep-Alive",
-      check: checks.sessionKeepAwake || { ok: false, detail: "Not checked" },
-      info: (checks.sessionKeepAwake || {}).detail,
-      warn: !isWindows,
-      required: false,
-      feature: "Desktop schedules that keep working",
-    },
   ];
 
   const allCriticalOk = checks.node.ok && checks.os.ok;
@@ -156,7 +183,7 @@ export default function StartupChecks({ onDismiss }) {
     { name: "Web Tests", available: features.webTests, needs: "Chrome" },
     { name: "Desktop Tests", available: features.desktopTests, needs: "Windows + PowerShell" },
     { name: "Scheduling", available: features.scheduling, needs: "Scheduler service" },
-    { name: "Scheduled Desktop Tests", available: features.desktopSchedules, needs: "Automation account signed in" },
+    { name: "Scheduled Desktop Tests", available: features.desktopSchedules, needs: "Automation account set up" },
     { name: "Git Clone", available: features.gitClone, needs: "Git" },
     { name: "Zephyr Reporting", available: features.zephyrReporting, needs: "ZEPHYR_API_TOKEN secret" },
   ];
@@ -204,6 +231,7 @@ export default function StartupChecks({ onDismiss }) {
                 color: row.check.ok ? "#333" : "#999",
               }}>
                 {row.info}
+                {row.check.canTest && <SessionTest />}
                 {row.check.hint && (
                   <div style={{ marginTop: "4px", fontSize: "12px", color: "#8a5300" }}>
                     {row.check.hint}
@@ -280,5 +308,16 @@ const btnStyle = {
   color: theme.primaryText,
   border: "none",
   borderRadius: "6px",
+  cursor: "pointer",
+};
+
+const smallBtnStyle = {
+  padding: "4px 12px",
+  fontSize: "12px",
+  fontWeight: "600",
+  backgroundColor: theme.primary,
+  color: theme.primaryText,
+  border: "none",
+  borderRadius: "4px",
   cursor: "pointer",
 };

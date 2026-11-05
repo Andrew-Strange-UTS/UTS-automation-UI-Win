@@ -10,13 +10,19 @@ const assert = require("node:assert");
 
 const {
   Reason,
-  KEEP_AWAKE_STALE_SECONDS,
+  DEFAULT_START_TIMEOUT_SECONDS,
+  buildConfigArgs,
+  buildStartArgs,
+  buildLogoffArgs,
+  checkSessionConfig,
+  startSession,
+  logoffSession,
+  waitForUsableSession,
   buildProbeArgs,
   buildLaunchArgs,
   buildRedirectedCommandLine,
   parseResult,
   describeReason,
-  describeKeepAwake,
   probeSession,
 } = require("./sessionLauncher");
 
@@ -207,49 +213,9 @@ test("a healthy active session carries no warning of its own", () => {
   assert.strictEqual(hint, undefined);
 });
 
-// ─── The keep-alive's own verdict ───
-
-test("a live keep-alive passes and says when it last reported", () => {
-  const { ok, cause } = describeKeepAwake({ user: USER, keepAwakeAgeSeconds: 12, inactivityTimeoutSecs: 900 });
-  assert.strictEqual(ok, true);
-  assert.match(cause, /last beat 12s ago/);
-  assert.match(cause, /limit 900s/, "the limit it is defending against is worth showing");
-});
-
-test("no keep-alive on a machine with a lock policy fails, while the session still works", () => {
-  // The session is fine right now and minutes from locking. A locked session
-  // cannot be unlocked: the password is discarded at setup by design. Saying so
-  // only once it has locked is too late to act on.
-  const { ok, cause, hint } = describeKeepAwake({ user: USER, inactivityTimeoutSecs: 900 });
-  assert.strictEqual(ok, false);
-  assert.match(cause, /Not running/);
-  assert.match(cause, /900s/);
-  assert.match(hint, /cannot be unlocked/);
-});
-
-test("a keep-alive that stopped reporting fails, and says how long ago", () => {
-  const { ok, cause, hint } = describeKeepAwake({ user: USER, keepAwakeAgeSeconds: 3600, inactivityTimeoutSecs: 900 });
-  assert.strictEqual(ok, false);
-  assert.match(cause, /Stopped 3600s ago/);
-  assert.match(hint, /can sit in "Running" with a stalled script/);
-});
-
-test("a machine with no inactivity limit does not need one, and is not marked broken", () => {
-  // A red row here would be a lie: nothing is going to lock that session.
-  const { ok, cause } = describeKeepAwake({ user: USER, inactivityTimeoutSecs: 0 });
-  assert.strictEqual(ok, true);
-  assert.match(cause, /Not needed/);
-});
-
-test("the staleness threshold is a boundary, not a suggestion", () => {
-  const limit = { user: USER, inactivityTimeoutSecs: 900 };
-  assert.strictEqual(describeKeepAwake({ ...limit, keepAwakeAgeSeconds: KEEP_AWAKE_STALE_SECONDS }).ok, true);
-  assert.strictEqual(describeKeepAwake({ ...limit, keepAwakeAgeSeconds: KEEP_AWAKE_STALE_SECONDS + 1 }).ok, false);
-});
-
 test("a disconnected session still reports the blank-capture caveat", () => {
   const { hint } = describeReason({
-    reason: Reason.OK, user: USER, sessionId: 2, state: "disconnected", keepAwakeAgeSeconds: 5,
+    reason: Reason.OK, user: USER, sessionId: 2, state: "disconnected",
   });
   assert.match(hint, /disconnected/);
 });
@@ -549,4 +515,150 @@ test("a run script carries what the run needs and nothing about who runs it", ()
   const cmd = files.written[Object.keys(files.written)[0]];
   assert.match(cmd, /set "NODE_PATH=/);
   assert.ok(!/set "TEMP=/i.test(cmd), "the user's own TEMP must survive");
+});
+
+// ─── On-demand sessions (EPEA-TBD-17, EPEA-TBD-18) ───
+
+const ok = (obj) => async () => ({ stdout: JSON.stringify(obj) + "\n" });
+
+test("EPEA-TBD-17: start asks the script to open a session, with a timeout long enough for a cold logon", () => {
+  const args = buildStartArgs({ scriptPath: SCRIPT, user: USER });
+  assert.deepStrictEqual(args.slice(-6), ["-Mode", "start", "-User", USER, "-TimeoutSeconds", String(DEFAULT_START_TIMEOUT_SECONDS)]);
+  assert.ok(DEFAULT_START_TIMEOUT_SECONDS >= 60, "a profile load on the VM can take most of a minute");
+});
+
+test("EPEA-TBD-17: logoff names the RDP client only when there is one", () => {
+  assert.deepStrictEqual(buildLogoffArgs({ scriptPath: SCRIPT, user: USER, clientPid: 812 }).slice(-6), ["-Mode", "logoff", "-User", USER, "-ClientPid", "812"]);
+  assert.ok(!buildLogoffArgs({ scriptPath: SCRIPT, user: USER }).includes("-ClientPid"));
+  assert.ok(!buildLogoffArgs({ scriptPath: SCRIPT, user: USER, clientPid: "812; calc" }).includes("-ClientPid"), "only an integer is passed through");
+});
+
+test("EPEA-TBD-18 AC1: the config check runs its own mode and starts nothing", () => {
+  const args = buildConfigArgs({ scriptPath: SCRIPT, user: USER });
+  assert.deepStrictEqual(args.slice(-4), ["-Mode", "config", "-User", USER]);
+});
+
+test("EPEA-TBD-17 AC4: a started session reports its id and RDP client", async () => {
+  const result = await startSession({
+    user: USER, platform: "win32",
+    run: ok({ ok: true, reason: "ok", user: USER, sessionId: 4, station: "RDP-Tcp#7", clientPid: 812, consoleSessionId: 1 }),
+  });
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.sessionId, 4);
+  assert.strictEqual(result.clientPid, 812);
+});
+
+test("EPEA-TBD-17 AC4: a session that never appears names the client's exit and where to look", async () => {
+  const result = await startSession({
+    user: USER, platform: "win32",
+    run: ok({ ok: false, reason: "session-timeout", clientExited: true, clientExitCode: 3 }),
+  });
+  assert.strictEqual(result.ok, false);
+  assert.match(result.cause, /RDP client exited \(code 3\)/);
+  assert.match(result.hint, /4625/);
+});
+
+test("EPEA-TBD-17: a start that prints nothing readable is a failure, never a session", async () => {
+  const result = await startSession({ user: USER, platform: "win32", run: async () => ({ stdout: "", stderr: "Add-Type failed" }) });
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, Reason.UNREADABLE);
+  assert.match(result.detail, /Add-Type failed/);
+});
+
+test("EPEA-TBD-17 AC10: a session on the console is refused", async () => {
+  const result = await startSession({
+    user: USER, platform: "win32",
+    run: ok({ ok: false, reason: "console-session", sessionId: 1, consoleSessionId: 1 }),
+  });
+  assert.strictEqual(result.ok, false);
+  assert.match(result.cause, /console session/);
+  assert.match(result.hint, /VMware console/);
+});
+
+test("EPEA-TBD-17 AC5: a logoff that leaves a session behind is a failure and names it", async () => {
+  const result = await logoffSession({
+    user: USER, clientPid: 812, platform: "win32",
+    run: ok({ ok: false, reason: "logoff-failed", remaining: ["4 RDP-Tcp#7 state=4"] }),
+  });
+  assert.strictEqual(result.ok, false);
+  assert.match(result.cause, /4 RDP-Tcp#7/);
+});
+
+test("EPEA-TBD-18 AC4: every reason the session row can be red has its own cause and fix", () => {
+  const reasons = [
+    Reason.ACCOUNT_MISSING, Reason.AUTOLOGON_ON, Reason.RDP_DISABLED, Reason.NO_CREDENTIAL,
+    Reason.RDP_DENIED, Reason.CONFIG_UNREADABLE, Reason.SESSION_EXISTS, Reason.SESSION_TIMEOUT,
+    Reason.CONSOLE_SESSION, Reason.LOGOFF_FAILED,
+  ];
+  const described = reasons.map((reason) => describeReason({ reason, user: USER }));
+  for (const [i, d] of described.entries()) {
+    assert.ok(d.cause, `${reasons[i]} has a cause`);
+    assert.ok(d.hint, `${reasons[i]} has a fix`);
+  }
+  assert.strictEqual(new Set(described.map((d) => d.cause)).size, reasons.length, "no two reasons share a cause");
+  assert.strictEqual(new Set(described.map((d) => d.hint)).size, reasons.length, "no two reasons share a fix");
+});
+
+test("EPEA-TBD-18 AC4: autologon still being on is red, and says the VM team has ruled it out", async () => {
+  const result = await checkSessionConfig({
+    user: USER, platform: "win32",
+    run: ok({ ok: false, reason: "autologon-on", autologon: true, credentialStored: true }),
+  });
+  assert.strictEqual(result.ok, false);
+  assert.match(result.cause, /Autologon/);
+  assert.match(result.hint, /does not allow autologon/);
+});
+
+test("EPEA-TBD-18 AC1: a ready configuration is ok even with no session open", async () => {
+  const result = await checkSessionConfig({
+    user: USER, platform: "win32",
+    run: ok({ ok: true, reason: "ok", autologon: false, rdpEnabled: true, credentialStored: true, rdpLogonDenied: false, inRemoteDesktopUsers: true, sessions: [] }),
+  });
+  assert.strictEqual(result.ok, true);
+  assert.deepStrictEqual(result.sessions, []);
+});
+
+test("EPEA-TBD-18 AC1: no session is no longer described as autologon having failed", () => {
+  const { hint } = describeReason({ reason: Reason.NO_SESSION, user: USER });
+  assert.doesNotMatch(hint, /autologon/i);
+});
+
+test("EPEA-TBD-17: the on-demand calls refuse to run without an account or off Windows", async () => {
+  const run = async () => { throw new Error("must not run"); };
+  assert.strictEqual((await startSession({ user: null, platform: "win32", run })).reason, Reason.NOT_CONFIGURED);
+  assert.strictEqual((await logoffSession({ user: USER, platform: "linux", run })).reason, Reason.NOT_WINDOWS);
+  assert.strictEqual((await checkSessionConfig({ user: null, platform: "win32", run })).reason, Reason.NOT_CONFIGURED);
+});
+
+test("EPEA-TBD-17 AC4: the desktop is probed until it answers, because the shell starts after the logon", async () => {
+  const answers = [{ ok: false, reason: "launch-failed" }, { ok: false, reason: "locked" }, { ok: true, reason: "ok", sessionId: 4 }];
+  let t = 0;
+  const result = await waitForUsableSession({
+    user: USER, probe: async () => answers.shift(), timeoutMs: 60000, pollMs: 3000,
+    now: () => t, sleep: async (ms) => { t += ms; },
+  });
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.attempts, 3);
+});
+
+test("EPEA-TBD-17 AC4: a desktop that never answers returns the last reason once the time is up", async () => {
+  let t = 0;
+  let calls = 0;
+  const result = await waitForUsableSession({
+    user: USER, probe: async () => { calls++; return { ok: false, reason: "probe-timeout" }; },
+    timeoutMs: 10000, pollMs: 3000, now: () => t, sleep: async (ms) => { t += ms; },
+  });
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, "probe-timeout");
+  assert.ok(calls >= 3 && calls <= 5, `retried within the deadline (${calls} probes)`);
+});
+
+test("EPEA-TBD-17 AC4: a token that cannot be taken is not retried, because waiting will not fix it", async () => {
+  let calls = 0;
+  const result = await waitForUsableSession({
+    user: USER, probe: async () => { calls++; return { ok: false, reason: "token-denied" }; },
+    sleep: async () => {},
+  });
+  assert.strictEqual(result.reason, "token-denied");
+  assert.strictEqual(calls, 1);
 });

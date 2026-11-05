@@ -13,7 +13,17 @@
     without any password), and create the process in that session on
     winsta0\default.
 
+    There is no session between runs (EPEA-TBD-17): autologon is not allowed on
+    the VM. The service opens one for a run by making an RDP connection from the
+    VM to itself (127.0.0.2), so it is never the console session, and logs it off
+    afterwards.
+
     Modes:
+      config       Report, without starting anything, whether an on-demand
+                   session is possible: account exists, password stored, RDP
+                   on, the account allowed RDP logon, and autologon off.
+      start        Open a loopback RDP session as the account and report its id.
+      logoff       Log off every session the account has, and close the client.
       probe        Report whether a usable session exists, proved by launching
                    a short-lived child in it that opens the input desktop.
       launch       Start a command in that session. With -Wait, exits with the
@@ -27,7 +37,7 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet("probe", "launch", "desktopcheck", "diagnose")]
+    [ValidateSet("probe", "launch", "desktopcheck", "diagnose", "config", "start", "logoff")]
     [string]$Mode = "probe",
 
     # The automation account whose session to use. Local account, name only.
@@ -47,6 +57,10 @@ param(
 
     [int]$TimeoutSeconds = 30,
 
+    # For -Mode logoff: the RDP client that -Mode start reported, closed if the
+    # logoff did not close it.
+    [int]$ClientPid = 0,
+
     [string]$DataDir = "C:\ProgramData\uts-automation"
 )
 
@@ -60,6 +74,16 @@ $ErrorActionPreference = "Stop"
 #   token-denied   the session exists but its token could not be taken
 #   launch-failed  CreateProcessAsUser failed
 #   probe-timeout  the probe child never returned
+#   account-missing   the automation account does not exist
+#   autologon-on      autologon is configured, which the VM team has ruled out
+#   rdp-disabled      Remote Desktop is turned off on this machine
+#   no-credential     the account's password is not in Marvin's LSA secret
+#   rdp-denied        the account is not allowed to log on over RDP
+#   config-unreadable a configuration check could not be completed
+#   session-exists    -Mode start found the account already signed in
+#   session-timeout   the RDP client never produced an active session
+#   console-session   the new session is the console session (must never be)
+#   logoff-failed     a session was still there after logoff
 
 function Write-Result {
     param([string]$Reason, [hashtable]$Extra = @{})
@@ -168,6 +192,26 @@ public class MarvinSession {
 
     [DllImport("kernel32.dll", SetLastError=true)]
     public static extern bool CloseHandle(IntPtr hObject);
+
+    [DllImport("wtsapi32.dll", SetLastError=true)]
+    public static extern bool WTSLogoffSession(IntPtr hServer, int SessionId, bool bWait);
+
+    [DllImport("kernel32.dll")]
+    public static extern int WTSGetActiveConsoleSessionId();
+}
+
+public class MarvinLsaRead {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct LSA_UNICODE_STRING { public ushort Length; public ushort MaximumLength; public IntPtr Buffer; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct LSA_OBJECT_ATTRIBUTES { public int Length; public IntPtr RootDirectory; public IntPtr ObjectName; public uint Attributes; public IntPtr SecurityDescriptor; public IntPtr SecurityQualityOfService; }
+
+    [DllImport("advapi32.dll")] public static extern uint LsaOpenPolicy(IntPtr SystemName, ref LSA_OBJECT_ATTRIBUTES ObjectAttributes, uint DesiredAccess, out IntPtr PolicyHandle);
+    [DllImport("advapi32.dll")] public static extern uint LsaRetrievePrivateData(IntPtr PolicyHandle, ref LSA_UNICODE_STRING KeyName, out IntPtr PrivateData);
+    [DllImport("advapi32.dll")] public static extern uint LsaFreeMemory(IntPtr Buffer);
+    [DllImport("advapi32.dll")] public static extern uint LsaClose(IntPtr PolicyHandle);
+    [DllImport("advapi32.dll")] public static extern int LsaNtStatusToWinError(uint Status);
 }
 "@
 
@@ -343,6 +387,296 @@ function Start-InSession {
     }
 }
 
+# ═══ On-demand sessions (EPEA-TBD-17) ═══
+#
+# These modes do not need the account to be signed in, so they run before the
+# session is resolved below.
+
+# Written by scripts/setup-automation-account.ps1. "L$" makes it a local
+# secret: never replicated, readable only by SYSTEM on this machine.
+$SecretName = 'L$MarvinAutomationPassword'
+$STATUS_OBJECT_NAME_NOT_FOUND = [uint32]3221225524   # 0xC0000034
+
+# $null when no secret is stored. The value is never written anywhere: it goes
+# straight into a DPAPI blob for the RDP client, and the variable is cleared.
+function Read-AutomationSecret {
+    $attrs = New-Object MarvinLsaRead+LSA_OBJECT_ATTRIBUTES
+    $attrs.Length = [Runtime.InteropServices.Marshal]::SizeOf($attrs)
+    $policy = [IntPtr]::Zero
+    $POLICY_GET_PRIVATE_INFORMATION = 0x00000004
+    $status = [MarvinLsaRead]::LsaOpenPolicy([IntPtr]::Zero, [ref]$attrs, $POLICY_GET_PRIVATE_INFORMATION, [ref]$policy)
+    if ($status -ne 0) { throw "LsaOpenPolicy failed: Win32 error $([MarvinLsaRead]::LsaNtStatusToWinError($status))" }
+    try {
+        $key = New-Object MarvinLsaRead+LSA_UNICODE_STRING
+        $key.Buffer = [Runtime.InteropServices.Marshal]::StringToHGlobalUni($SecretName)
+        $key.Length = [uint16]($SecretName.Length * 2)
+        $key.MaximumLength = [uint16](($SecretName.Length + 1) * 2)
+        $data = [IntPtr]::Zero
+        try {
+            $status = [MarvinLsaRead]::LsaRetrievePrivateData($policy, [ref]$key, [ref]$data)
+        } finally {
+            [Runtime.InteropServices.Marshal]::FreeHGlobal($key.Buffer)
+        }
+        if ($status -eq $STATUS_OBJECT_NAME_NOT_FOUND) { return $null }
+        if ($status -ne 0) { throw "LsaRetrievePrivateData failed: Win32 error $([MarvinLsaRead]::LsaNtStatusToWinError($status))" }
+        if ($data -eq [IntPtr]::Zero) { return $null }
+        try {
+            $s = [Runtime.InteropServices.Marshal]::PtrToStructure($data, [type][MarvinLsaRead+LSA_UNICODE_STRING])
+            if ($s.Length -eq 0) { return $null }
+            return [Runtime.InteropServices.Marshal]::PtrToStringUni($s.Buffer, $s.Length / 2)
+        } finally {
+            [void][MarvinLsaRead]::LsaFreeMemory($data)
+        }
+    } finally {
+        [void][MarvinLsaRead]::LsaClose($policy)
+    }
+}
+
+# Every session the account has, whatever state it is in.
+function Get-AccountSessions {
+    param([string]$UserName)
+    $pSessions = [IntPtr]::Zero
+    $count = 0
+    if ([MarvinSession]::WTSEnumerateSessionsW($WTS_CURRENT_SERVER, 0, 1, [ref]$pSessions, [ref]$count) -eq 0) { return @() }
+    try {
+        $size = [Runtime.InteropServices.Marshal]::SizeOf([type][MarvinSession+WTS_SESSION_INFO])
+        $found = @()
+        for ($i = 0; $i -lt $count; $i++) {
+            $info = [Runtime.InteropServices.Marshal]::PtrToStructure([IntPtr]($pSessions.ToInt64() + ($i * $size)), [type][MarvinSession+WTS_SESSION_INFO])
+            if ($info.SessionId -eq 0) { continue }
+            $name = Get-SessionUserName -SessionId $info.SessionId
+            if ($name -and ($name -ieq $UserName)) {
+                $found += [pscustomobject]@{ SessionId = $info.SessionId; Station = $info.pWinStationName; State = $info.State }
+            }
+        }
+        return $found
+    } finally {
+        [MarvinSession]::WTSFreeMemory($pSessions)
+    }
+}
+
+function Format-Sessions {
+    param($Sessions)
+    return @($Sessions | ForEach-Object { "$($_.SessionId) $($_.Station) state=$($_.State)" })
+}
+
+function Test-RdpEnabled {
+    $value = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name fDenyTSConnections -ErrorAction SilentlyContinue).fDenyTSConnections
+    return ($value -eq 0)
+}
+
+function Test-AutologonConfigured {
+    $value = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name AutoAdminLogon -ErrorAction SilentlyContinue).AutoAdminLogon
+    return ("$value" -eq "1")
+}
+
+# Loopback RDP is a Remote Desktop logon, so the account needs to be outside
+# "Deny log on through Remote Desktop Services" and inside Remote Desktop Users.
+function Get-RdpLogonRights {
+    param([string]$Sid)
+    $export = Join-Path $env:TEMP ("marvin-rights-" + [guid]::NewGuid().ToString("N") + ".inf")
+    try {
+        & secedit.exe /export /cfg $export /areas USER_RIGHTS /quiet | Out-Null
+        if (-not (Test-Path $export)) { throw "secedit did not export the user rights" }
+        $line = Select-String -Path $export -Pattern "^SeDenyRemoteInteractiveLogonRight\s*=" | Select-Object -First 1
+        $denied = $false
+        if ($line) { $denied = (($line.Line -split "=", 2)[1] -match [regex]::Escape("*$Sid")) }
+    } finally {
+        Remove-Item $export -ErrorAction SilentlyContinue
+    }
+    $members = @(Get-LocalGroupMember -SID "S-1-5-32-555" -ErrorAction Stop)
+    $inGroup = [bool]($members | Where-Object { $_.SID -and $_.SID.Value -eq $Sid })
+    return @{ denied = $denied; inRemoteDesktopUsers = $inGroup; allowed = ((-not $denied) -and $inGroup) }
+}
+
+if ($Mode -eq "config") {
+    if (-not (Get-LocalUser -Name $User -ErrorAction SilentlyContinue)) {
+        Write-Result "account-missing" @{ user = $User; detail = "There is no local account called $User." }
+        exit 1
+    }
+
+    $facts = @{ user = $User; consoleSessionId = [MarvinSession]::WTSGetActiveConsoleSessionId() }
+    try {
+        $facts.autologon = Test-AutologonConfigured
+        $facts.rdpEnabled = Test-RdpEnabled
+        $secret = Read-AutomationSecret
+        $facts.credentialStored = [bool]$secret
+        $secret = $null
+        $sid = (New-Object Security.Principal.NTAccount("$env:COMPUTERNAME\$User")).Translate([Security.Principal.SecurityIdentifier]).Value
+        $rights = Get-RdpLogonRights -Sid $sid
+        $facts.rdpLogonDenied = $rights.denied
+        $facts.inRemoteDesktopUsers = $rights.inRemoteDesktopUsers
+        $facts.sessions = Format-Sessions (Get-AccountSessions -UserName $User)
+    } catch {
+        $facts.detail = $_.Exception.Message
+        Write-Result "config-unreadable" $facts
+        exit 1
+    }
+
+    # Autologon first: it is the configuration the VM team has ruled out, so it
+    # outranks anything that merely stops desktop schedules working.
+    $reason = if ($facts.autologon) { "autologon-on" }
+        elseif (-not $facts.rdpEnabled) { "rdp-disabled" }
+        elseif (-not $facts.credentialStored) { "no-credential" }
+        elseif ($facts.rdpLogonDenied -or -not $facts.inRemoteDesktopUsers) { "rdp-denied" }
+        else { "ok" }
+    Write-Result $reason $facts
+    if ($reason -ne "ok") { exit 1 }
+    exit 0
+}
+
+if ($Mode -eq "start") {
+    if (-not (Test-RdpEnabled)) {
+        Write-Result "rdp-disabled" @{ user = $User }
+        exit 1
+    }
+
+    # An RDP logon reconnects to an existing session rather than creating one,
+    # so a leftover would be reused as-is. The lease logs leftovers off first;
+    # this is the check that it did.
+    $existing = @(Get-AccountSessions -UserName $User | Where-Object { $_.State -eq $WTSActive -or $_.State -eq $WTSDisconnected })
+    if ($existing.Count -gt 0) {
+        Write-Result "session-exists" @{ user = $User; sessions = (Format-Sessions $existing) }
+        exit 1
+    }
+
+    $password = Read-AutomationSecret
+    if (-not $password) {
+        Write-Result "no-credential" @{ user = $User }
+        exit 1
+    }
+
+    # The password reaches mstsc as a DPAPI blob (CurrentUser scope, which is
+    # SYSTEM here) inside a SYSTEM-only .rdp file. Never a command line, which
+    # any administrator can read, and never Credential Manager, which would be a
+    # second copy. The file goes as soon as the session exists.
+    $rdpDir = Join-Path $env:SystemRoot ("Temp\marvin-rdp-" + [guid]::NewGuid().ToString("N"))
+    $clientPid = 0
+    try {
+        New-Item -Path $rdpDir -ItemType Directory -Force | Out-Null
+        & icacls.exe $rdpDir /inheritance:r /grant "*S-1-5-18:(OI)(CI)F" /Q | Out-Null
+        $secure = ConvertTo-SecureString $password -AsPlainText -Force
+        $password = $null
+        $blob = ConvertFrom-SecureString $secure
+        $secure = $null
+        $rdpFile = Join-Path $rdpDir "session.rdp"
+        @(
+            "full address:s:127.0.0.2",
+            "username:s:$env:COMPUTERNAME\$User",
+            "password 51:b:$blob",
+            "prompt for credentials:i:0",
+            "promptcredentialonce:i:0",
+            "authentication level:i:0",
+            "enablecredsspsupport:i:1",
+            "negotiate security layer:i:1",
+            "screen mode id:i:1",
+            "desktopwidth:i:1920",
+            "desktopheight:i:1080",
+            "session bpp:i:32",
+            "redirectclipboard:i:0",
+            "redirectprinters:i:0",
+            "redirectdrives:i:0",
+            "redirectsmartcards:i:0",
+            "audiomode:i:2",
+            "autoreconnection enabled:i:1",
+            "connection type:i:7",
+            "networkautodetect:i:0"
+        ) | Set-Content -Path $rdpFile -Encoding Unicode
+        $blob = $null
+
+        $began = Get-Date
+        $client = Start-Process -FilePath (Join-Path $env:SystemRoot "System32\mstsc.exe") -ArgumentList "`"$rdpFile`"" -PassThru
+        $clientPid = $client.Id
+
+        $session = $null
+        $deadline = $began.AddSeconds($TimeoutSeconds)
+        while ((Get-Date) -lt $deadline) {
+            $session = Get-AccountSessions -UserName $User | Where-Object { $_.State -eq $WTSActive } | Select-Object -First 1
+            if ($session) { break }
+            if ($client.HasExited) { break }
+            Start-Sleep -Milliseconds 500
+        }
+    } finally {
+        $password = $null
+        Remove-Item $rdpDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    if (-not $session) {
+        $extra = @{
+            user = $User
+            clientPid = $clientPid
+            clientExited = [bool]$client.HasExited
+            sessions = (Format-Sessions (Get-AccountSessions -UserName $User))
+            timeoutSeconds = $TimeoutSeconds
+        }
+        if ($client.HasExited) { $extra.clientExitCode = $client.ExitCode }
+        # A disconnected leftover means the logon happened and the client died;
+        # report its id so the caller logs it off.
+        $leftover = Get-AccountSessions -UserName $User | Select-Object -First 1
+        if ($leftover) { $extra.sessionId = $leftover.SessionId }
+        Write-Result "session-timeout" $extra
+        exit 1
+    }
+
+    $console = [MarvinSession]::WTSGetActiveConsoleSessionId()
+    $extra = @{
+        user = $User
+        sessionId = $session.SessionId
+        station = $session.Station
+        clientPid = $clientPid
+        consoleSessionId = $console
+        seconds = [int]((Get-Date) - $began).TotalSeconds
+    }
+    # The whole point is that the VMware console never shows this desktop. If
+    # it somehow is the console session, refuse it rather than run in it.
+    if ($session.SessionId -eq $console -or $session.Station -notlike "RDP-Tcp#*") {
+        Write-Result "console-session" $extra
+        exit 1
+    }
+    Write-Result "ok" $extra
+    exit 0
+}
+
+if ($Mode -eq "logoff") {
+    $targets = @(Get-AccountSessions -UserName $User)
+    $failures = @()
+    foreach ($s in $targets) {
+        if (-not [MarvinSession]::WTSLogoffSession($WTS_CURRENT_SERVER, $s.SessionId, $true)) {
+            $failures += "$($s.SessionId): Win32 error $([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
+        }
+    }
+
+    # The client normally exits by itself once its session is gone. Only ever
+    # close the process -Mode start reported, and only if it is still mstsc:
+    # process ids are reused.
+    if ($ClientPid -gt 0) {
+        $proc = Get-Process -Id $ClientPid -ErrorAction SilentlyContinue
+        if ($proc -and $proc.ProcessName -ieq "mstsc") {
+            if (-not $proc.WaitForExit(5000)) {
+                try { $proc.Kill() } catch { $failures += "client $($ClientPid): $($_.Exception.Message)" }
+            }
+        }
+    }
+
+    # Checked, not assumed: WTSLogoffSession returning true is not proof.
+    $deadline = (Get-Date).AddSeconds(15)
+    do {
+        $left = @(Get-AccountSessions -UserName $User)
+        if ($left.Count -eq 0) { break }
+        Start-Sleep -Milliseconds 500
+    } while ((Get-Date) -lt $deadline)
+
+    $extra = @{ user = $User; loggedOff = @($targets | ForEach-Object { $_.SessionId }) }
+    if ($left.Count -gt 0 -or $failures.Count -gt 0) {
+        $extra.remaining = Format-Sessions $left
+        $extra.failures = $failures
+        Write-Result "logoff-failed" $extra
+        exit 1
+    }
+    Write-Result "ok" $extra
+    exit 0
+}
+
 # ─── Resolve the session ───
 
 $session = Find-AutomationSession -UserName $User
@@ -397,36 +731,10 @@ exit 0
     }
 
     if ($outcome.exitCode -eq 0) {
-        # How long since the keep-alive last proved it was alive. A scheduled
-        # task can sit in "Running" with a wedged script behind it, so the
-        # heartbeat is what gets reported, not the task's state.
-        $keepAwakeAge = $null
-        $heartbeat = Join-Path $DataDir "tmp\keep-awake.heartbeat"
-        if (Test-Path $heartbeat) {
-            try {
-                $stamp = [datetime]::Parse((Get-Content $heartbeat -Raw).Trim())
-                $keepAwakeAge = [int]((Get-Date) - $stamp).TotalSeconds
-            } catch {
-                $keepAwakeAge = $null
-            }
-        }
-
-        # Whether a keep-alive is needed at all depends on this policy. Without
-        # it, a missing keep-alive is not a fault and must not be shown as one.
-        $inactivityLimit = 0
-        try {
-            $value = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "InactivityTimeoutSecs" -ErrorAction SilentlyContinue).InactivityTimeoutSecs
-            if ($value) { $inactivityLimit = [int]$value }
-        } catch {
-            $inactivityLimit = 0
-        }
-
         Write-Result "ok" @{
             user = $User
             sessionId = $session.SessionId
             state = $stateName
-            keepAwakeAgeSeconds = $keepAwakeAge
-            inactivityTimeoutSecs = $inactivityLimit
         }
         exit 0
     }

@@ -134,10 +134,11 @@ router.get("/", async (req, res) => {
   // failure, so users are not sent to a command line for a recoverable state.
   checks.scheduler = await schedulerService.checkWithRecovery();
 
-  // --- Desktop session for scheduled desktop tests (EPEA-TBD-13) ---
+  // --- Desktop session for scheduled desktop tests (EPEA-TBD-13, EPEA-TBD-18) ---
   // Scheduled steps run from the service in Session 0, which has no interactive
-  // desktop, so desktop schedules need the automation account's session. The
-  // service probes it by launching a process in it and reports the result here.
+  // desktop, so desktop schedules need the automation account's session. That
+  // session is started for each run, so this reports whether one CAN be
+  // started; "Test session" below actually starts one.
   if (!isWindows) {
     checks.desktopSession = {
       ok: false,
@@ -159,6 +160,7 @@ router.get("/", async (req, res) => {
       // is shown whether or not the check passed.
       hint: session.hint,
       warn: Boolean(session.ok && session.hint),
+      canTest: true,
     };
   }
 
@@ -180,36 +182,12 @@ router.get("/", async (req, res) => {
     checks.defenderAsr = { ok: true, version: "Not applicable on this OS" };
   }
 
-  // --- Session keep-alive (EPEA-TBD-15) ---
-  // Its own row, because it fails on its own: the session can be healthy while
-  // the only thing stopping it from locking has been dead for an hour. On a
-  // machine with no inactivity limit it reports as not needed rather than
-  // failing, which would be a lie.
-  if (!isWindows || !checks.desktopSession.ok) {
-    checks.sessionKeepAwake = {
-      ok: false,
-      detail: !isWindows
-        ? "Only applies to scheduled desktop tests on Windows."
-        : "Unknown: there is no usable automation session to check.",
-    };
-  } else {
-    const keepAwake = checks.scheduler.keepAwake || {};
-    checks.sessionKeepAwake = {
-      ok: Boolean(keepAwake.ok),
-      version: keepAwake.ok ? keepAwake.cause : undefined,
-      detail: keepAwake.cause || "The keep-alive could not be checked.",
-      hint: keepAwake.hint,
-    };
-  }
-
   // --- Summary: what features are available ---
   const features = {
     webTests: checks.chrome.ok,
     desktopTests: isWindows && checks.powershell.ok,
     scheduling: checks.scheduler.ok,
     desktopSchedules: isWindows && checks.scheduler.ok && checks.desktopSession.ok,
-    // Available now, but not for long if the session is about to lock.
-    desktopSchedulesStayAvailable: isWindows && checks.desktopSession.ok && checks.sessionKeepAwake.ok,
     gitClone: checks.git.ok,
     // Marvin starts today; this says whether it will still start tomorrow.
     launchesAfterReboot: checks.defenderAsr.ok,
@@ -217,6 +195,36 @@ router.get("/", async (req, res) => {
   };
 
   res.json({ checks, features, platform });
+});
+
+// Start a real automation session, probe it and log it off (EPEA-TBD-18 AC2).
+// Proxied, because only the service (LocalSystem) can start one. Never run on
+// its own: it is a logon and takes tens of seconds.
+const SESSION_TEST_TIMEOUT_MS = 4 * 60 * 1000;
+
+router.post("/session-test", async (req, res) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SESSION_TEST_TIMEOUT_MS);
+  try {
+    const upstream = await fetch(`${schedulerService.SCHEDULER_URL}/api/session/test`, {
+      method: "POST",
+      signal: controller.signal,
+    });
+    const body = await upstream.json().catch(() => null);
+    if (!body) {
+      return res.status(502).json({ ok: false, cause: `The scheduler service answered HTTP ${upstream.status} with no readable result.` });
+    }
+    res.status(upstream.ok ? 200 : 502).json(body);
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      cause: err.name === "AbortError"
+        ? "The session test did not finish within four minutes."
+        : `The scheduler service could not be reached: ${err.message}`,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 });
 
 module.exports = router;

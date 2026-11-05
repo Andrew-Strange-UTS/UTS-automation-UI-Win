@@ -18,6 +18,7 @@ const { portableEncrypt, portableDecrypt } = require("./utils/portableEncryption
 const { makeScheduleSecrets } = require("./utils/scheduleSecrets");
 const { applyDataDirAcl, repairFileAcl, applyAutomationAccess } = require("./utils/dataDirAcl");
 const sessionLauncher = require("./utils/sessionLauncher");
+const { createSessionLease, runWithLease } = require("./utils/sessionLease");
 const { readAccountName } = require("./utils/automationAccount");
 const {
   DataStoreError,
@@ -570,19 +571,25 @@ main();
     // machine that cannot run tests.
     const message =
       "No automation account is set up, so this desktop sequence has no interactive session to run in.\n" +
-      "Scheduled desktop tests need a dedicated always-logged-on account. Run the automation account setup on this machine.\n";
+      "Scheduled desktop tests need a dedicated automation account. Run scripts\\setup-automation-account.ps1 on this machine.\n";
     onLog(message);
     setImmediate(() => onDone(1));
     return null;
   }
 
+  // The session exists only for the run (EPEA-TBD-17): the lease starts it,
+  // shares it with any overlapping desktop run, and logs it off after the last.
   const child = automation
-    ? sessionLauncher.startRunInSession({
-        user: automation,
-        seqDir,
-        env: childEnv,
-        nodeExe: process.execPath,
-        script: "run.js",
+    ? runWithLease({
+        lease: sessionLease,
+        startRun: () =>
+          sessionLauncher.startRunInSession({
+            user: automation,
+            seqDir,
+            env: childEnv,
+            nodeExe: process.execPath,
+            script: "run.js",
+          }),
       })
     : spawn("node", ["run.js"], { cwd: seqDir, env: childEnv });
 
@@ -844,19 +851,68 @@ function automationUser() {
   return readAccountName(paths.AUTOMATION_ACCOUNT_FILE);
 }
 
-// The probe starts a process, so it is not free. Health is polled during
-// startup recovery, and a probe per poll would be a process per poll.
-const SESSION_PROBE_TTL_MS = 15000;
-let sessionProbeCache = { at: 0, value: null };
+// ─── On-demand session (EPEA-TBD-17) ───
+//
+// Autologon is not allowed on the VM, so nothing is signed in between runs.
+// Starting a session means a loopback RDP logon, then probing until the
+// desktop answers, because the shell comes up after the logon does.
+const sessionLease = createSessionLease({
+  start: async () => {
+    const user = automationUser();
+    const started = await sessionLauncher.startSession({ user });
+    if (!started.ok) return started;
+    const ready = await sessionLauncher.waitForUsableSession({ user });
+    if (!ready.ok) {
+      // Keep the session's id so the lease logs off what was started.
+      return { ...ready, sessionId: started.sessionId, clientPid: started.clientPid };
+    }
+    console.log(
+      `[session] ${user} session ${started.sessionId} (${started.station}) ready; ` +
+        `logon took ${started.seconds}s, desktop answered after ${ready.attempts} probe(s)`
+    );
+    return { ...started, probe: ready };
+  },
+  logoff: async (session) => {
+    const result = await sessionLauncher.logoffSession({
+      user: automationUser(),
+      clientPid: session ? session.clientPid : undefined,
+    });
+    // Nothing to log off is the normal case for a sweep, not a failure.
+    if (result.reason === sessionLauncher.Reason.NOT_CONFIGURED) return { ok: true };
+    if (result.ok && Array.isArray(result.loggedOff) && result.loggedOff.length) {
+      console.log(`[session] Logged off ${result.user} session(s) ${result.loggedOff.join(", ")}`);
+    }
+    return result;
+  },
+  log: (message) => console.log(`[session] ${message}`),
+});
 
+// The config check runs secedit and reads the LSA, so it is not free, and
+// health is polled during startup recovery.
+const SESSION_CONFIG_TTL_MS = 15000;
+let sessionConfigCache = { at: 0, value: null };
+
+// Whether a session CAN be started, from configuration alone. No session being
+// open is the normal state between runs and is not an error (EPEA-TBD-18 AC1).
 async function checkDesktopSession() {
   const now = Date.now();
-  if (sessionProbeCache.value && now - sessionProbeCache.at < SESSION_PROBE_TTL_MS) {
-    return sessionProbeCache.value;
+  let config;
+  if (sessionConfigCache.value && now - sessionConfigCache.at < SESSION_CONFIG_TTL_MS) {
+    config = sessionConfigCache.value;
+  } else {
+    config = await sessionLauncher.checkSessionConfig({ user: automationUser() });
+    sessionConfigCache = { at: now, value: config };
   }
-  const value = await sessionLauncher.probeSession({ user: automationUser() });
-  sessionProbeCache = { at: now, value };
-  return value;
+  const lease = sessionLease.snapshot();
+  return {
+    ...config,
+    lease,
+    cause: config.ok
+      ? lease.state === "up"
+        ? `Session ${lease.sessionId} open for ${lease.holders} run(s)`
+        : "Ready: a session is started for each desktop run"
+      : config.cause,
+  };
 }
 
 // Health check. Uptime alone says nothing about whether the service can read
@@ -889,6 +945,32 @@ app.get("/api/health", async (req, res) => {
     detail: store.detail,
     hint: store.hint,
   });
+});
+
+// Start a real session, probe it and log it off (EPEA-TBD-18 AC2). Only ever
+// on request: it is a logon, and it takes tens of seconds. If a run already
+// holds the session this reuses it and leaves it open for that run.
+app.post("/api/session/test", async (req, res) => {
+  const began = Date.now();
+  try {
+    const lease = await sessionLease.acquire();
+    if (!lease.ok) {
+      return res.json({ ok: false, seconds: Math.round((Date.now() - began) / 1000), ...lease });
+    }
+    const readyAfter = Math.round((Date.now() - began) / 1000);
+    const released = await lease.release();
+    res.json({
+      ok: true,
+      sessionId: lease.session.sessionId,
+      station: lease.session.station,
+      readySeconds: readyAfter,
+      seconds: Math.round((Date.now() - began) / 1000),
+      loggedOff: released.loggedOff ? released.result && released.result.ok !== false : false,
+      sharedWithRun: !released.loggedOff,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, cause: "The session test failed to run.", detail: err.message });
+  }
 });
 
 // Why a launch into the automation session fails. Deliberately on the service:
@@ -1202,6 +1284,13 @@ function grantAutomationAccess() {
 grantAutomationAccess();
 migrateSecretsAtRest();
 restoreSchedules();
+
+// Whatever the account has open now was left by an earlier run of this
+// service, a crash or a reboot mid-run, and nothing else will log it off
+// (EPEA-TBD-17 AC6).
+if (process.platform === "win32" && automationUser()) {
+  sessionLease.sweep().catch((err) => console.error(`[session] Startup sweep failed: ${err.message}`));
+}
 
 app.listen(PORT, () => {
   console.log(`[scheduler-service] Running on http://localhost:${PORT}`);

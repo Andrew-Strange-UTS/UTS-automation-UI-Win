@@ -163,7 +163,8 @@ state.
 ### 6. Create the automation account
 
 **Scheduled desktop tests only.** They need a desktop, and the service does not
-have one, so they run in a dedicated account's session that stays signed in. See
+have one, so each desktop run gets its own session for a dedicated account,
+started for that run and logged off afterwards. See
 [Set up the automation account](#set-up-the-automation-account-scheduled-desktop-tests-only)
 for what this does and why.
 
@@ -171,39 +172,40 @@ for what this does and why.
 powershell -ExecutionPolicy Bypass -File scripts\setup-automation-account.ps1 -AppDir "C:\Program Files\Marvin"
 ```
 
-**Check** — read the `warnings` list it prints. A warning about
-`InactivityTimeoutSecs` means a machine-wide policy will lock the automation
-session and desktop schedules will fail once it fires; that VM needs an
-exemption.
+**Check:** read the `warnings` list it prints, and confirm `rdpLogonAllowed` is
+`true`. If it is `false`, a domain policy is overriding the logon rights and the
+VM team has to change it there.
 
-### 7. Reboot
+No reboot is needed. Nothing signs in at boot any more.
 
-The VM signs itself in as the automation account and stays signed in. That
-session is the desktop your overnight runs use. Sign back in as yourself
-afterwards as normal, then:
+### 7. Check it in the app
+
+Open Marvin and look at the startup checks:
+
+- **Scheduler Service** green, with your schedules loaded.
+- **Desktop Session** green, reading "Ready: a session is started for each
+  desktop run" (desktop schedules only).
+
+Then press **Test session** on the Desktop Session row. It starts a real session,
+waits for the desktop to answer, and logs it off, which takes tens of seconds.
+It should report the session as logged off at the end.
+
+A red row names the cause and the fix. There is a fuller list in
+[Verify the install](#verify-the-install).
+
+After the first session has existed (Test session counts), apply the per-user
+no-lock settings, which need the account's profile:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\setup-automation-account.ps1 -Mode settings
 ```
 
-Only needed if step 6 said the profile did not exist yet. Running it again is
-harmless.
-
-### 8. Check it in the app
-
-Open Marvin and look at the startup checks:
-
-- **Scheduler Service** green, with your schedules loaded.
-- **Desktop Session** green, naming a session (desktop schedules only).
-
-A red row names the cause and the fix. There is a fuller list in
-[Verify the install](#verify-the-install).
-
-### 9. Prove it end to end
+### 8. Prove it end to end
 
 Schedule a **desktop** sequence a few minutes out, then disconnect your RDP
-session and wait. Nothing else proves a run works with no human signed in, which
-is the entire point of the automation account.
+session and wait. The run log should show the session starting, the run, and
+"Automation session logged off." Nothing else proves a run works with nobody
+signed in.
 
 ## Reference
 
@@ -415,11 +417,27 @@ from there fails with `Access is denied` on every keystroke and
 Sequence, because that runs in your own session.
 
 Desktop automation needs a real desktop, and a desktop needs somebody signed
-in. For runs at 3am with nobody at the machine, that means a dedicated local
-account that is signed in permanently:
+in. Marvin used to keep a dedicated account signed in permanently with
+autologon. **It no longer does:** a VM that signs itself in, with its desktop
+reachable from the VMware console, is not allowed. Instead the service opens a
+session only when a desktop run needs one:
+
+1. A desktop schedule fires.
+2. The service makes an **RDP connection from the VM to itself** (`127.0.0.2`)
+   as the automation account. The connection never leaves the machine. Because
+   it is an RDP session, it is never the console session, so the VMware
+   console keeps showing the sign-in screen throughout. The service checks
+   this and refuses to run in a session that turns out to be the console's.
+3. It waits until the desktop answers, then runs the sequence in it.
+4. When the run ends (pass, fail, Stop or timeout) it logs the session off.
+   Desktop schedules that overlap share one session, which is logged off after
+   the last of them finishes.
+5. If the service is restarted or the VM reboots mid-run, the leftover session
+   is logged off when the service starts again.
+
+Set it up from an elevated prompt:
 
 ```powershell
-# elevated
 powershell -ExecutionPolicy Bypass -File scripts\setup-automation-account.ps1 `
   -AppDir "C:\Program Files\Marvin" -DataDir "C:\ProgramData\uts-automation"
 ```
@@ -428,38 +446,33 @@ What it does:
 
 - Creates the local account `marvin-auto`, **not** an administrator, with a
   48-byte random password it generates and never shows anyone.
-- Writes that password to the **LSA secret** Winlogon reads at boot, then
-  discards it. It is not written to a file and not put in Marvin's secrets
-  store. The service never needs it: `WTSQueryUserToken` hands LocalSystem a
-  token for an already signed-in session without any credential.
-- Denies that account network logon and Remote Desktop logon, and hides it from
-  the sign-in screen. Nobody can sign in as it, not least because nobody knows
-  the password.
+- Stores that password in an **LSA secret only SYSTEM can read**
+  (`L$MarvinAutomationPassword`). The service needs it to log the account on
+  for each run. It is not written to a file, not put in Marvin's secrets store,
+  and never appears on a command line: it reaches the RDP client as a
+  DPAPI-encrypted blob in a SYSTEM-only file that is deleted as soon as the
+  session exists.
+- **Turns autologon off** if it was set up for this account, and deletes the
+  old autologon password.
+- Logs off any session the account has open, such as an old autologon one.
+- Denies the account network logon, and **allows** it Remote Desktop logon,
+  because loopback RDP is a Remote Desktop logon. It is hidden from the sign-in
+  screen, and nobody knows its password.
+- Removes the old keep-alive scheduled task, which only existed to stop a
+  permanent session from locking.
 - Turns off the screensaver, the secure screensaver and workstation locking
-  **for that account only**. Input cannot be sent to a locked desktop, so a
-  lock at 3am is a failed run.
+  **for that account only** (once its profile exists; see step 7).
 - Grants it read and execute on the install directory, and read on the run
   directories under `C:\ProgramData\uts-automation`. The schedule store, the
   encrypted secrets and the master key stay restricted to SYSTEM and
   Administrators.
 
-Then **reboot**. The account signs in by itself and stays signed in.
-
-Two things to know:
-
-- **The per-user lock settings need a profile**, which only exists after the
-  first autologon. If the script says so, re-run it after the reboot with
-  `-Mode settings`.
-- **A machine-wide inactivity limit overrides all of this.** The script warns
-  if `InactivityTimeoutSecs` is set, and deliberately does not change it:
-  weakening a security baseline for the whole VM is not a script's call. If it
-  is set, that VM needs an exemption or scheduled desktop tests will start
-  failing whenever it fires.
-
-Marvin's startup checks show a **Desktop Session** row. It goes green only when
-Marvin can open that session's input desktop, which it proves by starting a
-process in the session rather than assuming it from the account existing. If it
-is red, the row names which of these is wrong.
+Marvin's startup checks show a **Desktop Session** row. It goes green when a
+session *can* be started: the account exists, its password is stored, Remote
+Desktop is on, the account may log on over RDP, and autologon is **off**. Having
+no session open is the normal state between runs. Autologon still being
+configured is shown red, because it is the configuration the VM team has ruled
+out. **Test session** proves the whole thing by starting a real session.
 
 Why the install directory matters: the run executes as `marvin-auto`, so
 everything it loads, including `node_modules`, has to be readable by that
@@ -468,82 +481,30 @@ because Windows grants Users read and execute there. A clone under
 `C:\Users\<someone>` is not, and no amount of configuration will make it
 work.
 
-### If the VM has a machine-wide inactivity limit
+### Migrating a VM that used autologon
 
-The setup script warns when it finds one:
-
-```
-WARNING: the machine-wide inactivity limit is set to 900 seconds. It will lock
-the automation session too, and scheduled desktop tests will fail once it fires.
-```
-
-This is the **"Interactive logon: Machine inactivity limit"** security setting,
-stored at
-`HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\InactivityTimeoutSecs`.
-It applies to every session on the machine, including the automation account's,
-and the per-user settings the setup script writes do not override it. Fifteen
-minutes of no input and the session locks.
-
-A locked desktop cannot be sent input, so every scheduled desktop run after that
-point fails. It is also **unrecoverable without a reboot**: the account's
-password is written to the LSA secret and discarded, by design, so nothing
-holds a credential that could unlock the session. Autologon on the next boot is
-the only way back in.
-
-Check what is set, and whether it is local or pushed by policy:
+Install the new build **first**, then re-run the setup script. The other order
+leaves a window where autologon is gone and the old build has no way to start a
+session, so every desktop schedule fails until the new build is in.
 
 ```powershell
-Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name InactivityTimeoutSecs
-gpresult /scope computer /r
+powershell -ExecutionPolicy Bypass -File scripts\setup-automation-account.ps1 -AppDir "C:\Program Files\Marvin"
 ```
 
-If a domain GPO applies it, clearing it locally is undone at the next policy
-refresh (usually within 90 minutes), so it has to be fixed centrally.
+Its output should show `autologonTurnedOff: true`, the old session in
+`sessionsLoggedOff`, `rdpLogonAllowed: true` and `keepAwakeTaskRemoved: true`.
+No reboot is needed; if you do reboot, nothing signs in.
 
-In order of preference:
+### If the VM has a machine-wide inactivity limit
 
-1. **Have the VM exempted** from that policy: its own OU, a WMI filter, or a
-   scoped policy that sets the limit to `0`. This is the correct fix. The VM
-   runs no interactive human sessions except administration, and the automation
-   account cannot be signed into by a person: it is denied network and Remote
-   Desktop logon, hidden from the sign-in screen, and nobody knows its password.
-2. **The built-in keep-alive**, which the setup script registers for you. It
-   runs in the automation session and injects a **zero-distance** mouse move
-   every four minutes: Windows counts it as input and resets the idle timer, but
-   the cursor does not move, so it cannot disturb a test that is driving the
-   mouse at that moment. A one-pixel jiggle would, which is why it is not one.
-
-   It is registered as a scheduled task triggered **at logon** for that account,
-   so autologon after any reboot brings it back with the session. Nothing needs
-   starting by hand.
-
-   It writes a heartbeat each cycle, and the **Desktop Session** startup check
-   reads it. If the keep-alive dies, the row still shows the session working but
-   adds a warning saying so, while the session is still unlocked and the problem
-   is still fixable. A scheduled task sitting in "Running" with a wedged script
-   behind it would otherwise look identical to one that is working.
-
-   Verify it, from an elevated prompt:
-
-   ```powershell
-   Get-ScheduledTask -TaskName "Marvin keep automation session awake" | Select TaskName, State
-   Get-Content C:\ProgramData\uts-automation\tmp\keep-awake.heartbeat
-   ```
-
-   The heartbeat should be within the last few minutes. If the file does not
-   exist, the keep-alive has never run in that session.
-
-   Be straight with whoever owns the policy about this: it is an inactivity
-   control being defeated for one account, even though that account cannot be
-   used by a person. Exempting the VM is the cleaner answer, which is why it is
-   still first on this list.
-3. **A reboot scheduled shortly before the run.** Autologon produces a fresh,
-   unlocked session, and the limit only fires after the idle period. This is
-   fragile (a run starting more than the limit after boot is back to square one)
-   and is a stopgap, not a fix.
-
-Until one of those is in place, **scheduled web tests still work normally**.
-Only desktop schedules depend on the session.
+"Interactive logon: Machine inactivity limit"
+(`HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\InactivityTimeoutSecs`)
+locks any session that goes that long without input, including the automation
+account's. With sessions that last only as long as a run, this matters far less
+than it did: the session starts fresh, and the test itself is sending input.
+It only bites if a single test sits idle for longer than the limit (a very long
+wait for an image, say). That run fails naming a locked desktop, and the next
+run gets a new session. No keep-alive is needed, and none is installed.
 
 ### Windows Defender blocks Marvin ("Windows cannot access the specified device, path, or file")
 

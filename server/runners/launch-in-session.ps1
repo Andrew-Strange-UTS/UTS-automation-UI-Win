@@ -470,6 +470,20 @@ function Test-AutologonConfigured {
     return ("$value" -eq "1")
 }
 
+# Membership by SID, through ADSI. Get-LocalGroupMember throws on a group
+# holding an orphaned SID (a deleted account), which a shared VM collects, and
+# that would make a working setup look broken.
+function Test-InLocalGroup {
+    param([string]$GroupSid, [string]$MemberSid)
+    $groupName = (New-Object Security.Principal.SecurityIdentifier($GroupSid)).Translate([Security.Principal.NTAccount]).Value.Split('\')[-1]
+    $group = [ADSI]"WinNT://$env:COMPUTERNAME/$groupName,group"
+    foreach ($member in @($group.psbase.Invoke("Members"))) {
+        $bytes = $member.GetType().InvokeMember("objectSid", "GetProperty", $null, $member, $null)
+        if ($bytes -and (New-Object Security.Principal.SecurityIdentifier($bytes, 0)).Value -eq $MemberSid) { return $true }
+    }
+    return $false
+}
+
 # Loopback RDP is a Remote Desktop logon, so the account needs to be outside
 # "Deny log on through Remote Desktop Services" and inside Remote Desktop Users.
 function Get-RdpLogonRights {
@@ -484,8 +498,7 @@ function Get-RdpLogonRights {
     } finally {
         Remove-Item $export -ErrorAction SilentlyContinue
     }
-    $members = @(Get-LocalGroupMember -SID "S-1-5-32-555" -ErrorAction Stop)
-    $inGroup = [bool]($members | Where-Object { $_.SID -and $_.SID.Value -eq $Sid })
+    $inGroup = Test-InLocalGroup -GroupSid "S-1-5-32-555" -MemberSid $Sid
     return @{ denied = $denied; inRemoteDesktopUsers = $inGroup; allowed = ((-not $denied) -and $inGroup) }
 }
 

@@ -131,6 +131,20 @@ function Test-MachineInactivityLimit {
     return $null
 }
 
+# Membership by SID, through ADSI. Get-LocalGroupMember throws on a group
+# holding an orphaned SID (a deleted account), which a shared VM collects, and
+# that would make a working setup look broken.
+function Test-InLocalGroup {
+    param([string]$GroupSid, [string]$MemberSid)
+    $groupName = (New-Object Security.Principal.SecurityIdentifier($GroupSid)).Translate([Security.Principal.NTAccount]).Value.Split('\')[-1]
+    $group = [ADSI]"WinNT://$env:COMPUTERNAME/$groupName,group"
+    foreach ($member in @($group.psbase.Invoke("Members"))) {
+        $bytes = $member.GetType().InvokeMember("objectSid", "GetProperty", $null, $member, $null)
+        if ($bytes -and (New-Object Security.Principal.SecurityIdentifier($bytes, 0)).Value -eq $MemberSid) { return $true }
+    }
+    return $false
+}
+
 # ─── Logon rights (EPEA-TBD-17) ───
 #
 # Network logon stays denied. Remote Desktop logon is now ALLOWED, because the
@@ -170,16 +184,16 @@ function Set-LogonRights {
     Remove-Item $export, $import -ErrorAction SilentlyContinue
 
     # Remote Desktop Users, by well-known SID so it works in any language.
-    $members = @(Get-LocalGroupMember -SID "S-1-5-32-555" -ErrorAction SilentlyContinue)
-    if (-not ($members | Where-Object { $_.SID -and $_.SID.Value -eq $Sid })) {
-        Add-LocalGroupMember -SID "S-1-5-32-555" -Member $Sid
+    if (-not (Test-InLocalGroup -GroupSid "S-1-5-32-555" -MemberSid $Sid)) {
+        $groupName = (New-Object Security.Principal.SecurityIdentifier("S-1-5-32-555")).Translate([Security.Principal.NTAccount]).Value.Split('\')[-1]
+        ([ADSI]"WinNT://$env:COMPUTERNAME/$groupName,group").Add("WinNT://$env:COMPUTERNAME/$Account,user")
     }
 
     # Read back, because secedit exits zero for a lot of things it did not do.
     & secedit.exe /export /cfg $export /areas USER_RIGHTS /quiet | Out-Null
     $stillDenied = [bool](Select-String -Path $export -Pattern ("^SeDenyRemoteInteractiveLogonRight\s*=.*" + [regex]::Escape("*$Sid")) -ErrorAction SilentlyContinue)
     Remove-Item $export -ErrorAction SilentlyContinue
-    $inGroup = [bool](@(Get-LocalGroupMember -SID "S-1-5-32-555" -ErrorAction SilentlyContinue) | Where-Object { $_.SID -and $_.SID.Value -eq $Sid })
+    $inGroup = Test-InLocalGroup -GroupSid "S-1-5-32-555" -MemberSid $Sid
 
     return @{ rdpDenyRemoved = $rdpDenyRemoved; rdpAllowed = ((-not $stillDenied) -and $inGroup) }
 }

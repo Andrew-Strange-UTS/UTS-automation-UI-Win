@@ -1,26 +1,42 @@
 <#
     setup-automation-account.ps1
 
-    Creates the local account that scheduled desktop tests run as, and sets up
-    autologon so its interactive session exists at 3am with nobody at the
-    machine. Run from an elevated PowerShell.
+    Creates the local account that scheduled desktop tests run as. Run from an
+    elevated PowerShell. Safe to re-run, and re-running it on a VM set up by
+    an older version migrates it (EPEA-TBD-17).
 
-    The password is generated here, written straight to the LSA secret that
-    Winlogon reads, and then discarded. It is never printed, never written to a
-    file, and never put in Marvin's secrets store: the scheduler service does
-    not need it. WTSQueryUserToken hands LocalSystem a token for an already
-    logged-on session without any credential, so the only consumer of that
-    password is Winlogon at boot.
+    There is no autologon. The VM team does not allow a VM that signs itself in
+    and whose desktop is reachable from the VMware console, so the scheduler
+    service opens a session only for a desktop run, by making an RDP connection
+    from the VM to itself (127.0.0.2), and logs it off afterwards. That session
+    is never the console session.
 
-    Recovery, if the password ever has to change: reset the account and run
-    this again. There is no copy to recover.
+    To log on each time, the service needs the account's password. It is
+    generated here from a CSPRNG and written to an LSA secret only SYSTEM can
+    read (L$MarvinAutomationPassword). It is never printed, never written to a
+    file and never put in Marvin's secrets store, and no person knows it.
+
+    What this changes:
+      - creates the account (or resets its password), never an administrator
+      - stores the password in the LSA secret above
+      - turns autologon OFF and deletes the old autologon password
+      - logs off any session the account has open (an old autologon session)
+      - denies network logon; allows Remote Desktop logon, which loopback RDP
+        needs (removes the old deny, adds the account to Remote Desktop Users)
+      - hides the account from the sign-in screen
+      - removes the old keep-alive scheduled task
+      - per-user no-lock settings (once the profile exists)
+      - read access to the install, and the run directories
+
+    Recovery, if the password ever has to change: run this again. It resets
+    the account and stores the new password.
 
       -Account    local account name (default marvin-auto)
       -DataDir    Marvin's shared data directory
       -AppDir     Marvin's install directory, granted read+execute
       -Mode       all | settings   ("settings" re-applies the per-user
                   lock/screensaver settings once the profile exists, which is
-                  after the first autologon)
+                  after the first session: use Test session in Marvin first)
 #>
 
 [CmdletBinding()]
@@ -110,43 +126,70 @@ function Test-MachineInactivityLimit {
     $key = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
     $value = (Get-ItemProperty -Path $key -Name "InactivityTimeoutSecs" -ErrorAction SilentlyContinue).InactivityTimeoutSecs
     if ($value -and $value -gt 0) {
-        return "WARNING: the machine-wide inactivity limit is set to $value seconds. It will lock the automation session too, and scheduled desktop tests will fail once it fires. This script does not change machine-wide policy: exempt this VM or clear InactivityTimeoutSecs."
+        return "Note: the machine-wide inactivity limit is $value seconds. Each desktop run gets a fresh session, so this only matters if a single test goes that long without any input; that run would fail on a locked desktop and the next one would start clean."
     }
     return $null
 }
 
-# ─── Deny every way in except autologon (AC2) ───
-function Deny-LogonRights {
+# ─── Logon rights (EPEA-TBD-17) ───
+#
+# Network logon stays denied. Remote Desktop logon is now ALLOWED, because the
+# run's session is an RDP connection from the VM to itself; an older setup
+# denied it, so that deny is removed here.
+function Set-LogonRights {
     param([string]$Sid)
 
     $export = Join-Path $env:TEMP "marvin-secpol-export.inf"
     $import = Join-Path $env:TEMP "marvin-secpol-import.inf"
-    & secedit.exe /export /cfg $export /quiet | Out-Null
+    & secedit.exe /export /cfg $export /areas USER_RIGHTS /quiet | Out-Null
 
-    $rights = @{
-        "SeDenyNetworkLogonRight" = $Sid
-        "SeDenyRemoteInteractiveLogonRight" = $Sid
+    function Get-Right([string]$Right) {
+        $existing = (Select-String -Path $export -Pattern "^$Right\s*=" -ErrorAction SilentlyContinue | Select-Object -First 1)
+        if ($existing) { return ($existing.Line -split "=", 2)[1].Trim() }
+        return ""
     }
 
     $lines = @("[Unicode]", "Unicode=yes", "[Version]", 'signature="$CHICAGO$"', "Revision=1", "[Privilege Rights]")
-    foreach ($right in $rights.Keys) {
-        $existing = (Select-String -Path $export -Pattern "^$right\s*=" -ErrorAction SilentlyContinue | Select-Object -First 1)
-        $value = if ($existing) { ($existing.Line -split "=", 2)[1].Trim() } else { "" }
-        if ($value -notmatch [regex]::Escape("*$Sid")) {
-            $value = if ($value) { "$value,*$Sid" } else { "*$Sid" }
-        }
-        $lines += "$right = $value"
+
+    $network = Get-Right "SeDenyNetworkLogonRight"
+    if ($network -notmatch [regex]::Escape("*$Sid")) {
+        $network = if ($network) { "$network,*$Sid" } else { "*$Sid" }
+    }
+    $lines += "SeDenyNetworkLogonRight = $network"
+
+    $rdp = Get-Right "SeDenyRemoteInteractiveLogonRight"
+    $rdpDenyRemoved = $false
+    if ($rdp -match [regex]::Escape("*$Sid")) {
+        $rdp = (($rdp -split ",") | ForEach-Object { $_.Trim() } | Where-Object { $_ -and $_ -ne "*$Sid" }) -join ","
+        $lines += "SeDenyRemoteInteractiveLogonRight = $rdp"
+        $rdpDenyRemoved = $true
     }
 
     Set-Content -Path $import -Value $lines -Encoding Unicode
     & secedit.exe /configure /db "$env:TEMP\marvin-secpol.sdb" /cfg $import /areas USER_RIGHTS /quiet | Out-Null
     Remove-Item $export, $import -ErrorAction SilentlyContinue
+
+    # Remote Desktop Users, by well-known SID so it works in any language.
+    $members = @(Get-LocalGroupMember -SID "S-1-5-32-555" -ErrorAction SilentlyContinue)
+    if (-not ($members | Where-Object { $_.SID -and $_.SID.Value -eq $Sid })) {
+        Add-LocalGroupMember -SID "S-1-5-32-555" -Member $Sid
+    }
+
+    # Read back, because secedit exits zero for a lot of things it did not do.
+    & secedit.exe /export /cfg $export /areas USER_RIGHTS /quiet | Out-Null
+    $stillDenied = [bool](Select-String -Path $export -Pattern ("^SeDenyRemoteInteractiveLogonRight\s*=.*" + [regex]::Escape("*$Sid")) -ErrorAction SilentlyContinue)
+    Remove-Item $export -ErrorAction SilentlyContinue
+    $inGroup = [bool](@(Get-LocalGroupMember -SID "S-1-5-32-555" -ErrorAction SilentlyContinue) | Where-Object { $_.SID -and $_.SID.Value -eq $Sid })
+
+    return @{ rdpDenyRemoved = $rdpDenyRemoved; rdpAllowed = ((-not $stillDenied) -and $inGroup) }
 }
 
-# ─── The LSA secret Winlogon reads (AC3) ───
-function Set-AutologonSecret {
-    param([string]$Password)
-
+# ─── LSA secrets (EPEA-TBD-17 AC2, AC3) ───
+#
+# Set-LsaSecret with $null deletes the secret: that is how the old autologon
+# password (DefaultPassword) is removed.
+function Initialize-Natives {
+    if ("MarvinLsa" -as [type]) { return }
     Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
@@ -169,17 +212,39 @@ public class MarvinLsa {
         public IntPtr SecurityQualityOfService;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WTS_SESSION_INFO {
+        public int SessionId;
+        [MarshalAs(UnmanagedType.LPWStr)] public string pWinStationName;
+        public int State;
+    }
+
     [DllImport("advapi32.dll", SetLastError=true)]
     public static extern uint LsaOpenPolicy(IntPtr SystemName, ref LSA_OBJECT_ATTRIBUTES ObjectAttributes, uint DesiredAccess, out IntPtr PolicyHandle);
 
     [DllImport("advapi32.dll", SetLastError=true)]
     public static extern uint LsaStorePrivateData(IntPtr PolicyHandle, ref LSA_UNICODE_STRING KeyName, ref LSA_UNICODE_STRING PrivateData);
 
+    [DllImport("advapi32.dll", SetLastError=true, EntryPoint="LsaStorePrivateData")]
+    public static extern uint LsaDeletePrivateData(IntPtr PolicyHandle, ref LSA_UNICODE_STRING KeyName, IntPtr PrivateData);
+
     [DllImport("advapi32.dll")]
     public static extern uint LsaClose(IntPtr PolicyHandle);
 
     [DllImport("advapi32.dll")]
     public static extern int LsaNtStatusToWinError(uint Status);
+
+    [DllImport("wtsapi32.dll", SetLastError=true)]
+    public static extern int WTSEnumerateSessionsW(IntPtr hServer, int Reserved, int Version, ref IntPtr ppSessionInfo, ref int pCount);
+
+    [DllImport("wtsapi32.dll")]
+    public static extern void WTSFreeMemory(IntPtr pMemory);
+
+    [DllImport("wtsapi32.dll", SetLastError=true)]
+    public static extern bool WTSQuerySessionInformationW(IntPtr hServer, int sessionId, int wtsInfoClass, out IntPtr ppBuffer, out int pBytesReturned);
+
+    [DllImport("wtsapi32.dll", SetLastError=true)]
+    public static extern bool WTSLogoffSession(IntPtr hServer, int SessionId, bool bWait);
 
     public static LSA_UNICODE_STRING Str(string value) {
         LSA_UNICODE_STRING s = new LSA_UNICODE_STRING();
@@ -190,27 +255,72 @@ public class MarvinLsa {
     }
 }
 "@
+}
+
+function Set-LsaSecret {
+    param([string]$KeyName, [string]$Value)
+    Initialize-Natives
 
     $attrs = New-Object MarvinLsa+LSA_OBJECT_ATTRIBUTES
     $attrs.Length = [Runtime.InteropServices.Marshal]::SizeOf($attrs)
     $policy = [IntPtr]::Zero
     $POLICY_CREATE_SECRET = 0x00000020
     $POLICY_WRITE = 0x000007F8
+    $STATUS_OBJECT_NAME_NOT_FOUND = [uint32]3221225524
 
     $status = [MarvinLsa]::LsaOpenPolicy([IntPtr]::Zero, [ref]$attrs, ($POLICY_CREATE_SECRET -bor $POLICY_WRITE), [ref]$policy)
     if ($status -ne 0) { throw "LsaOpenPolicy failed: Win32 error $([MarvinLsa]::LsaNtStatusToWinError($status))" }
 
     try {
-        $key = [MarvinLsa]::Str("DefaultPassword")
-        $data = [MarvinLsa]::Str($Password)
-        $status = [MarvinLsa]::LsaStorePrivateData($policy, [ref]$key, [ref]$data)
-        if ($status -ne 0) { throw "LsaStorePrivateData failed: Win32 error $([MarvinLsa]::LsaNtStatusToWinError($status))" }
-        [Runtime.InteropServices.Marshal]::ZeroFreeGlobalAllocUnicode($data.Buffer)
-        [Runtime.InteropServices.Marshal]::FreeHGlobal($key.Buffer)
+        $key = [MarvinLsa]::Str($KeyName)
+        try {
+            if ($null -eq $Value) {
+                $status = [MarvinLsa]::LsaDeletePrivateData($policy, [ref]$key, [IntPtr]::Zero)
+                if ($status -eq $STATUS_OBJECT_NAME_NOT_FOUND) { return }
+            } else {
+                $data = [MarvinLsa]::Str($Value)
+                try {
+                    $status = [MarvinLsa]::LsaStorePrivateData($policy, [ref]$key, [ref]$data)
+                } finally {
+                    [Runtime.InteropServices.Marshal]::ZeroFreeGlobalAllocUnicode($data.Buffer)
+                }
+            }
+            if ($status -ne 0) { throw "LsaStorePrivateData($KeyName) failed: Win32 error $([MarvinLsa]::LsaNtStatusToWinError($status))" }
+        } finally {
+            [Runtime.InteropServices.Marshal]::FreeHGlobal($key.Buffer)
+        }
     }
     finally {
         [void][MarvinLsa]::LsaClose($policy)
     }
+}
+
+# ─── Log off what the account has open (EPEA-TBD-17 AC2) ───
+#
+# On a VM migrating from autologon, the account is signed in on the console
+# right now. That is exactly what the VM team has ruled out, so it goes here,
+# not at the next reboot.
+function Stop-AccountSessions {
+    param([string]$Name)
+    Initialize-Natives
+    $p = [IntPtr]::Zero; $count = 0
+    if ([MarvinLsa]::WTSEnumerateSessionsW([IntPtr]::Zero, 0, 1, [ref]$p, [ref]$count) -eq 0) { return @() }
+    $ids = @()
+    try {
+        $size = [Runtime.InteropServices.Marshal]::SizeOf([type][MarvinLsa+WTS_SESSION_INFO])
+        for ($i = 0; $i -lt $count; $i++) {
+            $info = [Runtime.InteropServices.Marshal]::PtrToStructure([IntPtr]($p.ToInt64() + $i * $size), [type][MarvinLsa+WTS_SESSION_INFO])
+            if ($info.SessionId -eq 0) { continue }
+            $buf = [IntPtr]::Zero; $bytes = 0
+            if ([MarvinLsa]::WTSQuerySessionInformationW([IntPtr]::Zero, $info.SessionId, 5, [ref]$buf, [ref]$bytes)) {
+                $user = [Runtime.InteropServices.Marshal]::PtrToStringUni($buf)
+                [MarvinLsa]::WTSFreeMemory($buf)
+                if ($user -ieq $Name) { $ids += $info.SessionId }
+            }
+        }
+    } finally { [MarvinLsa]::WTSFreeMemory($p) }
+    foreach ($id in $ids) { [void][MarvinLsa]::WTSLogoffSession([IntPtr]::Zero, $id, $true) }
+    return $ids
 }
 
 # ─── Access to the run directories ───
@@ -252,42 +362,16 @@ function Grant-RunDirectoryAccess {
     return @{ granted = $true }
 }
 
-# ─── Keep the session unlocked (only matters with an inactivity limit) ───
+# ─── The old keep-alive (EPEA-TBD-18 AC3) ───
 #
-# Registered against the account and triggered at logon, so autologon after any
-# reboot brings it back with the session. It runs the script from the install
-# directory, which the account can read; this script's own location may be in
-# somebody's profile, which it cannot.
-function Register-KeepAwakeTask {
-    param([string]$Sid, [string]$ScriptPath, [int]$IntervalSeconds = 240)
-
+# It kept a permanent autologon session from hitting the inactivity limit.
+# Sessions now last only as long as a run, so it is removed.
+function Remove-KeepAwakeTask {
     $taskName = "Marvin keep automation session awake"
-
-    if (-not (Test-Path $ScriptPath)) {
-        return @{ registered = $false; detail = "Keep-alive not registered: $ScriptPath does not exist. Pass -AppDir pointing at the Marvin install." }
-    }
-
-    $action = New-ScheduledTaskAction -Execute "powershell.exe" `
-        -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`" -IntervalSeconds $IntervalSeconds -DataDir `"$DataDir`""
-    # Qualified, not bare: a bare name does not match the logon, and the task
-    # sits at SCHED_S_TASK_HAS_NOT_RUN forever without ever reporting an error.
-    $qualified = "$env:COMPUTERNAME\$Account"
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $qualified
-    $principal = New-ScheduledTaskPrincipal -UserId $qualified -LogonType Interactive -RunLevel Limited
-    # Defaults would stop it after three days and refuse to start it on battery
-    # or while the machine is "idle", which is precisely when it is needed.
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-        -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-    $settings.DisallowStartIfOnBatteries = $false
-    $settings.StopIfGoingOnBatteries = $false
-    $settings.IdleSettings.StopOnIdleEnd = $false
-
-    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
-        -Principal $principal -Settings $settings `
-        -Description "Injects a zero-distance mouse move so the automation session does not hit the machine inactivity limit." | Out-Null
-
-    return @{ registered = $true; taskName = $taskName; script = $ScriptPath }
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if (-not $task) { return $false }
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+    return $true
 }
 
 # ─── Run ───
@@ -295,7 +379,11 @@ function Register-KeepAwakeTask {
 Assert-Elevated
 
 $winlogon = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
+$SecretName = 'L$MarvinAutomationPassword'
 $warnings = @()
+$rights = $null
+$loggedOff = @()
+$autologonRemoved = $false
 
 if ($Mode -eq "all") {
     $password = New-AutomationPassword
@@ -315,23 +403,42 @@ if ($Mode -eq "all") {
 
     $sid = Get-AccountSid -Name $Account
 
-    Set-AutologonSecret -Password $password
+    Set-LsaSecret -KeyName $SecretName -Value $password
     $password = $null
     $secure = $null
     [gc]::Collect()
 
-    Set-ItemProperty -Path $winlogon -Name "AutoAdminLogon" -Value "1" -Type String
-    Set-ItemProperty -Path $winlogon -Name "DefaultUserName" -Value $Account -Type String
-    Set-ItemProperty -Path $winlogon -Name "DefaultDomainName" -Value $env:COMPUTERNAME -Type String
-    # A plaintext DefaultPassword here would defeat the whole point.
-    Remove-ItemProperty -Path $winlogon -Name "DefaultPassword" -ErrorAction SilentlyContinue
+    # ─── Autologon off (EPEA-TBD-17 AC2) ───
+    # Only Marvin's own autologon is undone. Autologon for some other account
+    # is not this script's to remove, but it is still reported, because the
+    # VM team has ruled out autologon on this VM whoever it is for.
+    $wasOn = ((Get-ItemProperty -Path $winlogon -Name "AutoAdminLogon" -ErrorAction SilentlyContinue).AutoAdminLogon -eq "1")
+    $defaultUser = (Get-ItemProperty -Path $winlogon -Name "DefaultUserName" -ErrorAction SilentlyContinue).DefaultUserName
+    if (-not $defaultUser -or ($defaultUser -ieq $Account)) {
+        Set-ItemProperty -Path $winlogon -Name "AutoAdminLogon" -Value "0" -Type String
+        Remove-ItemProperty -Path $winlogon -Name "DefaultUserName" -ErrorAction SilentlyContinue
+        Remove-ItemProperty -Path $winlogon -Name "DefaultDomainName" -ErrorAction SilentlyContinue
+        Remove-ItemProperty -Path $winlogon -Name "DefaultPassword" -ErrorAction SilentlyContinue
+        Remove-ItemProperty -Path $winlogon -Name "AutoLogonCount" -ErrorAction SilentlyContinue
+        # The old setup put the password where Winlogon reads it. That copy is
+        # now stale (the password was just reset) and has no reader, so it goes.
+        Set-LsaSecret -KeyName "DefaultPassword" -Value $null
+        $autologonRemoved = $wasOn
+    } elseif ($wasOn) {
+        $warnings += "Autologon is configured for another account ($defaultUser). This script leaves it alone, but the VM team does not allow autologon on this VM, and Marvin's startup check will show it red."
+    }
 
     # Hidden from the sign-in screen's user list.
     $userList = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList"
     if (-not (Test-Path $userList)) { New-Item -Path $userList -Force | Out-Null }
     Set-ItemProperty -Path $userList -Name $Account -Value 0 -Type DWord
 
-    Deny-LogonRights -Sid $sid
+    $rights = Set-LogonRights -Sid $sid
+    if (-not $rights.rdpAllowed) {
+        $warnings += "$Account could not be given the Remote Desktop logon right. A domain Group Policy may be setting 'Deny log on through Remote Desktop Services' or 'Allow log on through Remote Desktop Services'; the VM team has to change it there. Until then, no session can be started for desktop runs."
+    }
+
+    $loggedOff = @(Stop-AccountSessions -Name $Account)
 
     # Read and execute on the install directory, so the run can load node and
     # the server's node_modules.
@@ -346,15 +453,18 @@ if ($Mode -eq "all") {
     # writes a byte-order mark with that switch, and the service parses this
     # file as JSON, which a BOM breaks.
     $accountFile = Join-Path $DataDir "automation-account.json"
-    $recordedKeepAwake = if ($AppDir) { Join-Path $AppDir "resources\app\server\runners\keep-session-awake.ps1" } else { $null }
     $accountJson = @{
         user = $Account
         configuredAt = (Get-Date).ToString("o")
-        keepAwakeScript = $recordedKeepAwake
+        sessionMode = "on-demand"
     } | ConvertTo-Json
     [System.IO.File]::WriteAllText($accountFile, $accountJson, (New-Object System.Text.UTF8Encoding($false)))
 } else {
     $sid = Get-AccountSid -Name $Account
+}
+
+if ((Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name fDenyTSConnections -ErrorAction SilentlyContinue).fDenyTSConnections -ne 0) {
+    $warnings += "Remote Desktop is turned off on this machine. Sessions for desktop runs are opened over RDP from the machine to itself, so it has to be on."
 }
 
 $settings = Set-NoLockSettings -Sid $sid
@@ -363,37 +473,7 @@ if (-not $settings.applied) { $warnings += $settings.detail }
 $inactivity = Test-MachineInactivityLimit
 if ($inactivity) { $warnings += $inactivity }
 
-# The keep-alive only exists because of a machine-wide inactivity limit, but
-# register it either way: the policy can be turned on later, and nobody would
-# connect a locked session at 3am to a policy change made weeks earlier.
-$accountFile = Join-Path $DataDir "automation-account.json"
-
-# Resolution order matters. -AppDir is explicit. Otherwise reuse whatever was
-# recorded when the account was set up, because re-running with -Mode settings
-# used to silently re-point the task at this script's own location, which is
-# usually a profile the automation account cannot read.
-$keepAwakeScript = $null
-if ($AppDir) {
-    $keepAwakeScript = Join-Path $AppDir "resources\app\server\runners\keep-session-awake.ps1"
-} elseif (Test-Path $accountFile) {
-    try {
-        $recorded = (Get-Content $accountFile -Raw | ConvertFrom-Json).keepAwakeScript
-        if ($recorded) { $keepAwakeScript = $recorded }
-    } catch {
-        $keepAwakeScript = $null
-    }
-}
-if (-not $keepAwakeScript) {
-    $keepAwakeScript = Join-Path $PSScriptRoot "..\server\runners\keep-session-awake.ps1"
-}
-
-# A path under a user profile cannot be read by the automation account, so the
-# task would be registered and then fail silently at every logon.
-if ($keepAwakeScript -like "$env:SystemDrive\Users\*") {
-    $warnings += "The keep-alive script resolved to $keepAwakeScript, which is inside a user profile. The automation account cannot read another user's profile, so the task will fail at logon. Re-run with -AppDir pointing at the Marvin install."
-}
-$keepAwake = Register-KeepAwakeTask -Sid $sid -ScriptPath $keepAwakeScript
-if (-not $keepAwake.registered) { $warnings += $keepAwake.detail }
+$keepAwakeRemoved = Remove-KeepAwakeTask
 
 $access = Grant-RunDirectoryAccess -Account $Account -DataDir $DataDir
 if (-not $access.granted) { $warnings += $access.detail }
@@ -402,10 +482,13 @@ if (-not $access.granted) { $warnings += $access.detail }
     ok = $true
     user = $Account
     sid = $sid
+    sessionMode = "on-demand"
+    autologonTurnedOff = $autologonRemoved
+    sessionsLoggedOff = $loggedOff
+    rdpLogonAllowed = if ($rights) { $rights.rdpAllowed } else { $null }
     lockSettingsApplied = $settings.applied
-    keepAwakeRegistered = $keepAwake.registered
+    keepAwakeTaskRemoved = $keepAwakeRemoved
     runDirectoryAccessGranted = $access.granted
-    keepAwakeScript = $keepAwake.script
     warnings = $warnings
-    next = "Reboot. The account signs in automatically, and Marvin's startup check will show the Desktop Session row green once it can open that session's input desktop."
+    next = "No reboot needed. Open Marvin: the Desktop Session row should be green, and Test session should start a session, answer, and log it off. After the first session exists, re-run this with -Mode settings to apply the per-user no-lock settings."
 } | ConvertTo-Json -Depth 4

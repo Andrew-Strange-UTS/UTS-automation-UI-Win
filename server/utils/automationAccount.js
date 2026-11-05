@@ -1,11 +1,12 @@
 // server/utils/automationAccount.js
 // Which local account runs scheduled desktop tests.
 //
-// The file holds a name and nothing else. No password is stored anywhere, by
-// anything: the service takes the session token of an already logged-on
-// session (WTSQueryUserToken), which needs no credential, and the only thing
-// that ever needs the password is Winlogon at boot, which reads it from the LSA
-// secret. See scripts/setup-automation-account.ps1.
+// The file holds a name and nothing else. The account's password lives only in
+// an LSA secret that SYSTEM can read (EPEA-TBD-17): the service needs it to
+// open a loopback RDP session for each desktop run. It is never in this file,
+// never in Marvin's secrets store, and never in this process: the PowerShell
+// launcher reads it and hands it straight to the RDP client. See
+// scripts/setup-automation-account.ps1.
 
 const fsDefault = require("fs");
 

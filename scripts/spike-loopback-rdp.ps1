@@ -300,9 +300,16 @@ try {
         $originalDeny = $null   # nothing to restore
         Step "deny RDP logon right was not set" $true
     }
-    $rdpUsers = Get-LocalGroupMember -SID "S-1-5-32-555" -ErrorAction SilentlyContinue
-    if (-not ($rdpUsers | Where-Object { $_.SID.Value -eq $sid })) {
-        Add-LocalGroupMember -SID "S-1-5-32-555" -Member $sid
+    # ADSI, not Get-LocalGroupMember, which throws on orphaned SIDs.
+    $rdpGroupName = (New-Object Security.Principal.SecurityIdentifier("S-1-5-32-555")).Translate([Security.Principal.NTAccount]).Value.Split('\')[-1]
+    $rdpGroup = [ADSI]"WinNT://$env:COMPUTERNAME/$rdpGroupName,group"
+    $isMember = $false
+    foreach ($member in @($rdpGroup.psbase.Invoke("Members"))) {
+        $bytes = $member.GetType().InvokeMember("objectSid", "GetProperty", $null, $member, $null)
+        if ($bytes -and (New-Object Security.Principal.SecurityIdentifier($bytes, 0)).Value -eq $sid) { $isMember = $true }
+    }
+    if (-not $isMember) {
+        $rdpGroup.Add("WinNT://$env:COMPUTERNAME/$Account,user")
         $addedToRdpUsers = $true
         Step "added to Remote Desktop Users" $true
     }
@@ -520,7 +527,7 @@ finally {
     if (-not $KeepRdpRight) {
         try {
             if ($null -ne $originalDeny) { Set-DenyRdpValue -Value $originalDeny; Step "restored deny RDP logon right" $true }
-            if ($addedToRdpUsers) { Remove-LocalGroupMember -SID "S-1-5-32-555" -Member $sid; Step "removed from Remote Desktop Users" $true }
+            if ($addedToRdpUsers) { $rdpGroup.Remove("WinNT://$env:COMPUTERNAME/$Account,user"); Step "removed from Remote Desktop Users" $true }
         } catch { Step "restore rights" $false $_.Exception.Message }
     }
 

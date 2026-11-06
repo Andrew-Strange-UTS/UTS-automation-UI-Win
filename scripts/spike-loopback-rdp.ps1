@@ -221,6 +221,83 @@ function Get-Sessions {
     finally { [SpikeNative]::WTSFreeMemory($p) }
 }
 
+# ─── Diagnostics for a client that never makes a session ───
+# The client runs in Session 0, where nobody can see a dialog it shows. Its
+# windows are on this task's desktop, though, so their text can be read.
+Add-Type -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public class SpikeWin {
+    delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr lParam);
+    [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumProc cb, IntPtr lParam);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hWnd, StringBuilder s, int max);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hWnd, StringBuilder s, int max);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
+
+    static string Text(IntPtr h) { var b = new StringBuilder(1024); GetWindowText(h, b, b.Capacity); return b.ToString(); }
+    static string Cls(IntPtr h) { var b = new StringBuilder(256); GetClassName(h, b, b.Capacity); return b.ToString(); }
+
+    public static List<string> Describe(uint pid) {
+        var found = new List<string>();
+        EnumWindows((h, l) => {
+            uint p; GetWindowThreadProcessId(h, out p);
+            if (p != pid) return true;
+            var parts = new List<string>();
+            EnumChildWindows(h, (c, l2) => {
+                var t = Text(c);
+                if (!string.IsNullOrWhiteSpace(t)) parts.Add(Cls(c) + ": " + t.Replace("\r", " ").Replace("\n", " "));
+                return true;
+            }, IntPtr.Zero);
+            found.Add((IsWindowVisible(h) ? "visible" : "hidden") + " [" + Cls(h) + "] '" + Text(h) + "'" + (parts.Count > 0 ? " { " + string.Join(" | ", parts) + " }" : ""));
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+}
+"@
+
+function Get-ClientWindows {
+    param($Process)
+    try { if ($Process -and -not $Process.HasExited) { return @([SpikeWin]::Describe([uint32]$Process.Id)) } } catch { return @("could not read windows: $($_.Exception.Message)") }
+    return @()
+}
+
+# RDP and logon events since the client started, so a failure says where it
+# stopped: never connected, connected but refused, or signed in and dropped.
+function Get-SpikeEvents {
+    param([datetime]$Since)
+    $logs = @(
+        @{ LogName = "Security"; Id = 4624, 4625, 4648 },
+        @{ LogName = "Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational" },
+        @{ LogName = "Microsoft-Windows-TerminalServices-LocalSessionManager/Operational" },
+        @{ LogName = "Microsoft-Windows-RemoteDesktopServices-RdpCoreTS/Operational" },
+        @{ LogName = "Microsoft-Windows-TerminalServices-RDPClient/Operational" }
+    )
+    $out = @()
+    foreach ($filter in $logs) {
+        $f = @{ StartTime = $Since } + $filter
+        try {
+            foreach ($e in @(Get-WinEvent -FilterHashtable $f -MaxEvents 60 -ErrorAction Stop)) {
+                $msg = ($e.Message -replace "\s+", " ")
+                # Other people sign in to this VM all day. Keep only our account's
+                # logon events; the RDP logs are short enough to keep whole.
+                if ($filter.LogName -eq "Security" -and $msg -notmatch [regex]::Escape($Account)) { continue }
+                if ($msg.Length -gt 400) { $msg = $msg.Substring(0, 400) + "..." }
+                $out += "$($e.TimeCreated.ToString('HH:mm:ss')) $($filter.LogName.Split('/')[0].Replace('Microsoft-Windows-','')) $($e.Id): $msg"
+            }
+        } catch {
+            if ($_.Exception.Message -notmatch "No events were found") { $out += "$($filter.LogName): $($_.Exception.Message)" }
+        }
+    }
+    return @($out | Sort-Object)
+}
+
+
 function Get-AccountSessions {
     @(Get-Sessions | Where-Object { $_.id -ne 0 -and $_.user -and ($_.user -ieq $Account) })
 }
@@ -274,6 +351,7 @@ $clientProc = $null
 $originalDeny = $null
 $addedToRdpUsers = $false
 $autologonPaused = $false
+$startedAt = $null
 $sid = $null
 
 try {
@@ -436,6 +514,7 @@ try {
     if ($rdpDir) { Remove-Item $rdpDir -Recurse -Force -ErrorAction SilentlyContinue; $rdpDir = $null }
 
     if (-not $session) {
+        $facts.clientWindows = @(Get-ClientWindows $clientProc)
         $exit = if ($clientProc.HasExited) { "client exited with code $($clientProc.ExitCode)" } else { "client still running" }
         $seen = @(Get-AccountSessions | ForEach-Object { "$($_.id) $($_.station) state=$($_.state)" })
         throw "No active session for $Account within $SessionWaitSeconds s ($exit; account sessions seen: $($seen -join '; ')). Check Event Viewer > Microsoft-Windows-TerminalServices-RemoteConnectionManager and Security log 4625."
@@ -590,6 +669,10 @@ finally {
             if ($null -ne $originalDeny) { Set-DenyRdpValue -Value $originalDeny; Step "restored deny RDP logon right" $true }
             if ($addedToRdpUsers) { $rdpGroup.Remove("WinNT://$env:COMPUTERNAME/$Account,user"); Step "removed from Remote Desktop Users" $true }
         } catch { Step "restore rights" $false $_.Exception.Message }
+    }
+
+    if ($startedAt) {
+        try { $facts.events = @(Get-SpikeEvents -Since $startedAt.AddSeconds(-5)) } catch { $facts.events = @("could not read events: $($_.Exception.Message)") }
     }
 
     $verdict.passed = [bool](

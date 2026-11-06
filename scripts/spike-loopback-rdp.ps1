@@ -27,8 +27,12 @@
          straight back in on the console, and the spike would measure that
          instead of RDP. Autologon is put back at the end.
       5. Starts the RDP client against 127.0.0.2 as the account, with no
-         visible window. The password goes in as a DPAPI-encrypted blob in a
-         SYSTEM-only .rdp file that is deleted as soon as the session exists.
+         visible window. No .rdp file is used (opening one shows a security
+         warning nobody can click in Session 0). The password goes into
+         SYSTEM's credential store for TERMSRV/127.0.0.2 through CredWrite,
+         never on a command line, and is deleted as soon as the session exists.
+         Saved credentials are allowed for that one target and the certificate
+         warning is turned off for SYSTEM's client, both only for the run.
       6. Waits for the session, and records whether it is an RDP session and
          whether it is the console session (it must not be).
       7. Runs Marvin's own session probe against it.
@@ -298,6 +302,14 @@ function Get-SpikeEvents {
 }
 
 
+# reg.exe writes success messages to stderr, which PowerShell 5.1 turns into
+# a terminating error under ErrorActionPreference Stop.
+function Invoke-Reg {
+    $ErrorActionPreference = "Continue"
+    & reg.exe @args 2>&1 | Out-Null
+    return $LASTEXITCODE
+}
+
 function Get-AccountSessions {
     @(Get-Sessions | Where-Object { $_.id -ne 0 -and $_.user -and ($_.user -ieq $Account) })
 }
@@ -351,6 +363,9 @@ $clientProc = $null
 $originalDeny = $null
 $addedToRdpUsers = $false
 $autologonPaused = $false
+$credWritten = $false
+$delegChanged = $false
+$authOverrideChanged = $false
 $startedAt = $null
 $sid = $null
 
@@ -444,41 +459,78 @@ try {
     Step "no session for the account" $true
 
     # ─── 5. Start the client ───
-    $rdpDir = Join-Path $env:SystemRoot ("Temp\marvin-spike-" + [guid]::NewGuid().ToString("N"))
-    New-Item -Path $rdpDir -ItemType Directory -Force | Out-Null
-    & icacls.exe $rdpDir /inheritance:r /grant "*S-1-5-18:(OI)(CI)F" /Q | Out-Null
-
     $startedAt = Get-Date
     if ($Client -eq "mstsc") {
-        # DPAPI, CurrentUser scope, which is SYSTEM here: only this account on
-        # this machine can decrypt it. mstsc reads exactly this hex format.
-        $secure = ConvertTo-SecureString $password -AsPlainText -Force
-        $blob = ConvertFrom-SecureString $secure
-        $rdpFile = Join-Path $rdpDir "loopback.rdp"
-        @(
-            "full address:s:127.0.0.2",
-            "username:s:$env:COMPUTERNAME\$Account",
-            "password 51:b:$blob",
-            "prompt for credentials:i:0",
-            "promptcredentialonce:i:0",
-            "authentication level:i:0",
-            "enablecredsspsupport:i:1",
-            "negotiate security layer:i:1",
-            "screen mode id:i:1",
-            "desktopwidth:i:1920",
-            "desktopheight:i:1080",
-            "session bpp:i:32",
-            "redirectclipboard:i:0",
-            "redirectprinters:i:0",
-            "redirectdrives:i:0",
-            "redirectsmartcards:i:0",
-            "audiomode:i:2",
-            "autoreconnection enabled:i:1",
-            "connection type:i:7",
-            "networkautodetect:i:0"
-        ) | Set-Content -Path $rdpFile -Encoding Unicode
-        $blob = $null; $secure = $null
-        $clientProc = Start-Process -FilePath (Join-Path $env:SystemRoot "System32\mstsc.exe") -ArgumentList "`"$rdpFile`"" -PassThru
+        # No .rdp file: opening one now shows a security warning ("You are
+        # opening an RDP file...") that nobody can click in Session 0, which
+        # is where the second run stopped. mstsc /v: opens no file.
+        #
+        # The password goes into SYSTEM's credential store for TERMSRV/127.0.0.2,
+        # written through CredWrite so it is never on a command line, and is
+        # deleted as soon as the session exists (or fails to).
+        Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class SpikeCred {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct CREDENTIAL {
+        public uint Flags; public uint Type; public string TargetName; public string Comment;
+        public long LastWritten; public uint CredentialBlobSize; public IntPtr CredentialBlob;
+        public uint Persist; public uint AttributeCount; public IntPtr Attributes;
+        public string TargetAlias; public string UserName;
+    }
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool CredWriteW(ref CREDENTIAL c, uint flags);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool CredDeleteW(string target, uint type, uint flags);
+    public static int Write(string target, string user, string password) {
+        var c = new CREDENTIAL();
+        c.Type = 1;      // CRED_TYPE_GENERIC, what mstsc itself saves for TERMSRV/
+        c.TargetName = target;
+        c.UserName = user;
+        c.Persist = 1;   // CRED_PERSIST_SESSION: this logon session only, never on disk
+        c.CredentialBlob = Marshal.StringToCoTaskMemUni(password);
+        c.CredentialBlobSize = (uint)(password.Length * 2);
+        try { return CredWriteW(ref c, 0) ? 0 : Marshal.GetLastWin32Error(); }
+        finally { Marshal.ZeroFreeCoTaskMemUnicode(c.CredentialBlob); }
+    }
+    public static bool Delete(string target) { return CredDeleteW(target, 1, 0); }
+}
+"@
+        # A loopback logon cannot verify the server by Kerberos, so CredSSP
+        # refuses saved credentials unless policy allows them for this target.
+        # Allowed for TERMSRV/127.0.0.2 only, for the length of the spike.
+        $delegKey = "HKLM\SOFTWARE\Policies\Microsoft\Windows\CredentialsDelegation"
+        $delegBackup = Join-Path $env:SystemRoot ("Temp\marvin-spike-deleg-" + [guid]::NewGuid().ToString("N") + ".reg")
+        $hadDelegKey = Test-Path "Registry::$delegKey"
+        if ($hadDelegKey) {
+            if ((Invoke-Reg export $delegKey $delegBackup /y) -ne 0) { throw "Could not back up $delegKey, so it would not be safe to change it." }
+        }
+        $delegChanged = $true
+        foreach ($name in "AllowSavedCredentials", "AllowSavedCredentialsWhenNTLMOnly") {
+            New-Item -Path "Registry::$delegKey\$name" -Force | Out-Null
+            Set-ItemProperty -Path "Registry::$delegKey" -Name $name -Value 1 -Type DWord
+            $existing = @((Get-Item "Registry::$delegKey\$name").Property)
+            $slot = 1; while ($existing -contains "$slot") { $slot++ }
+            Set-ItemProperty -Path "Registry::$delegKey\$name" -Name "$slot" -Value "TERMSRV/127.0.0.2"
+        }
+        Set-ItemProperty -Path "Registry::$delegKey" -Name "ConcatenateDefaults_AllowSaved" -Value 1 -Type DWord
+        Set-ItemProperty -Path "Registry::$delegKey" -Name "ConcatenateDefaults_AllowSavedNTLMOnly" -Value 1 -Type DWord
+        Step "saved credentials allowed for TERMSRV/127.0.0.2" $true
+
+        # The server's certificate is not issued to 127.0.0.2, so mstsc would
+        # stop on a certificate warning. HKCU here is SYSTEM's own hive.
+        $tscKey = "HKCU:\Software\Microsoft\Terminal Server Client"
+        New-Item -Path $tscKey -Force | Out-Null
+        $origAuthOverride = (Get-ItemProperty $tscKey -Name AuthenticationLevelOverride -ErrorAction SilentlyContinue).AuthenticationLevelOverride
+        $authOverrideChanged = $true
+        Set-ItemProperty -Path $tscKey -Name AuthenticationLevelOverride -Value 0 -Type DWord
+
+        $credTarget = "TERMSRV/127.0.0.2"
+        $err = [SpikeCred]::Write($credTarget, "$env:COMPUTERNAME\$Account", $password)
+        if ($err -ne 0) { throw "CredWrite failed with Win32 error $err." }
+        $credWritten = $true
+        Step "credential stored for $credTarget" $true
+
+        $clientProc = Start-Process -FilePath (Join-Path $env:SystemRoot "System32\mstsc.exe") -ArgumentList "/v:127.0.0.2 /w:1920 /h:1080" -PassThru
         Step "mstsc started" $true "pid $($clientProc.Id)"
     } else {
         if (-not $FreeRdpPath -or -not (Test-Path $FreeRdpPath)) { throw "-Client freerdp needs -FreeRdpPath pointing at wfreerdp.exe." }
@@ -508,10 +560,15 @@ try {
         }
         if ($session) { break }
         if ($clientProc.HasExited) { break }
+        # Dialogs can come and go, so keep every distinct window state seen.
+        foreach ($w in @(Get-ClientWindows $clientProc)) {
+            if (-not $facts.clientWindowsSeen) { $facts.clientWindowsSeen = @() }
+            if ($facts.clientWindowsSeen -notcontains $w) { $facts.clientWindowsSeen += $w }
+        }
         Start-Sleep -Milliseconds 500
     }
-    # The .rdp file has done its job the moment a session exists, or failed to.
-    if ($rdpDir) { Remove-Item $rdpDir -Recurse -Force -ErrorAction SilentlyContinue; $rdpDir = $null }
+    # The stored credential has done its job the moment a session exists, or failed to.
+    if ($credWritten) { $credWritten = -not [SpikeCred]::Delete($credTarget); Step "credential deleted" (-not $credWritten) }
 
     if (-not $session) {
         $facts.clientWindows = @(Get-ClientWindows $clientProc)
@@ -635,7 +692,7 @@ catch {
 finally {
     $password = $null
     [gc]::Collect()
-    if ($rdpDir) { Remove-Item $rdpDir -Recurse -Force -ErrorAction SilentlyContinue }
+    if ($credWritten) { try { [void][SpikeCred]::Delete($credTarget) } catch {} }
 
     # ─── 9. Log off ───
     try {
@@ -654,7 +711,25 @@ finally {
         Step "logged off" ($left.Count -eq 0) (@($left | ForEach-Object { "$($_.id) $($_.station) state=$($_.state)" }) -join "; ")
     } catch { Step "logoff" $false $_.Exception.Message }
 
-    # ─── 10. Put autologon and the rights back ───
+    # ─── 10. Put the client settings, autologon and the rights back ───
+    if ($delegChanged) {
+        try {
+            $code = Invoke-Reg delete $delegKey /f
+            if ($hadDelegKey) {
+                $code = Invoke-Reg import $delegBackup
+                if ($code -eq 0) { Remove-Item $delegBackup -Force -ErrorAction SilentlyContinue }
+            }
+            Step "credential delegation policy restored" ($code -eq 0) $(if ($code -ne 0) { "reg.exe exit $code; backup kept at $delegBackup" })
+        } catch { Step "restore credential delegation policy" $false $_.Exception.Message }
+    }
+    if ($authOverrideChanged) {
+        try {
+            if ($null -eq $origAuthOverride) { Remove-ItemProperty -Path $tscKey -Name AuthenticationLevelOverride -ErrorAction SilentlyContinue }
+            else { Set-ItemProperty -Path $tscKey -Name AuthenticationLevelOverride -Value $origAuthOverride -Type DWord }
+            Step "certificate warning setting restored" $true
+        } catch { Step "restore certificate warning setting" $false $_.Exception.Message }
+    }
+
     # Restoring the flag does not sign the account in again until the next
     # reboot, which is why the current build needs one after the spike.
     if ($autologonPaused) {

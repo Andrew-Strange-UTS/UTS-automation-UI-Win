@@ -102,22 +102,38 @@ if (-not $AsSystem) {
     $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
 
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    # schtasks.exe writes to stderr when the task is missing. Under
+    # ErrorActionPreference Stop, PowerShell 5.1 turns that into a terminating
+    # error, so it runs here with Continue and the output comes back as text.
+    function Invoke-Schtasks {
+        $ErrorActionPreference = "Continue"
+        $out = & schtasks.exe @args 2>&1 | ForEach-Object { "$_" }
+        [pscustomobject]@{ Code = $LASTEXITCODE; Output = $out }
+    }
+
+    [void](Invoke-Schtasks /Delete /TN $TaskName /F)
     Register-ScheduledTask -TaskName $TaskName -Action $action -Principal $principal -Settings $settings | Out-Null
 
+    # The task is watched through schtasks.exe and the report file, not the
+    # ScheduledTasks cmdlets: those ride on a CIM session that can drop part
+    # way through ("Call was canceled by the message filter"), which used to
+    # abort the wait while the SYSTEM half was still running.
     try {
         Write-Host "Running the spike as SYSTEM. This takes a minute or two..."
-        Start-ScheduledTask -TaskName $TaskName
+        $run = Invoke-Schtasks /Run /TN $TaskName
+        if ($run.Code -ne 0) { throw "schtasks /Run failed ($($run.Code)): $($run.Output -join ' ')" }
         $deadline = (Get-Date).AddMinutes(15)
         Start-Sleep -Seconds 3
         while ((Get-Date) -lt $deadline) {
-            $state = (Get-ScheduledTask -TaskName $TaskName).State
-            if ($state -ne "Running" -and (Test-Path $report)) { break }
+            if (Test-Path $report) {
+                $query = Invoke-Schtasks /Query /TN $TaskName /FO CSV /NH
+                if (($query.Output -join "") -notmatch '"Running"') { break }
+            }
             Start-Sleep -Seconds 2
         }
         if (-not (Test-Path $report)) {
-            $info = Get-ScheduledTaskInfo -TaskName $TaskName
-            throw "The SYSTEM task finished without writing a report. Last result: $($info.LastTaskResult). Run it again; if it repeats, the task itself is failing to start."
+            $detail = ((Invoke-Schtasks /Query /TN $TaskName /V /FO LIST).Output | Select-String "Last Result|Status") -join "; "
+            throw "The SYSTEM task did not write a report within 15 minutes. $detail"
         }
         Get-Content $report -Raw
         Write-Host ""
@@ -125,7 +141,9 @@ if (-not $AsSystem) {
         Write-Host "Send that file back. It contains no password."
     }
     finally {
-        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+        if ((Invoke-Schtasks /Delete /TN $TaskName /F).Code -ne 0) {
+            Write-Warning "Could not remove the task '$TaskName'. Remove it with: schtasks /Delete /TN `"$TaskName`" /F"
+        }
     }
     exit 0
 }

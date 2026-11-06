@@ -22,9 +22,10 @@
       3. Temporarily lets the account log on over RDP (removes it from "Deny
          log on through Remote Desktop Services" and adds it to Remote Desktop
          Users), because that is what loopback RDP needs.
-      4. Logs off the account's existing autologon session, if there is one.
-         Otherwise the RDP logon would just take over that session and prove
-         nothing.
+      4. Pauses autologon (AutoAdminLogon 0) and logs off the account's
+         existing session. Without the pause, Winlogon signs the account
+         straight back in on the console, and the spike would measure that
+         instead of RDP. Autologon is put back at the end.
       5. Starts the RDP client against 127.0.0.2 as the account, with no
          visible window. The password goes in as a DPAPI-encrypted blob in a
          SYSTEM-only .rdp file that is deleted as soon as the session exists.
@@ -272,6 +273,7 @@ $rdpDir = $null
 $clientProc = $null
 $originalDeny = $null
 $addedToRdpUsers = $false
+$autologonPaused = $false
 $sid = $null
 
 try {
@@ -332,13 +334,36 @@ try {
         Step "added to Remote Desktop Users" $true
     }
 
-    # ─── 4. Clear the existing session ───
+    # ─── 4. Pause autologon, then clear the existing session ───
+    # With AutoAdminLogon 1, Winlogon signs the account back in on the console
+    # the moment it is logged off. The first run of this spike measured that
+    # console session, not RDP. The flag goes back in the finally block.
+    $winlogonKey = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
+    if ((Get-ItemProperty $winlogonKey -Name AutoAdminLogon -ErrorAction SilentlyContinue).AutoAdminLogon -eq "1") {
+        Set-ItemProperty $winlogonKey -Name AutoAdminLogon -Value "0"
+        $autologonPaused = $true
+        Step "autologon paused" $true
+    }
+
     foreach ($s in Get-AccountSessions) {
         $ok = [SpikeNative]::WTSLogoffSession([IntPtr]::Zero, $s.id, $true)
         Step "logged off existing session $($s.id) ($($s.station))" $ok
     }
-    Start-Sleep -Seconds 3
-    if ((Get-AccountSessions).Count -gt 0) { throw "The account still has a session after logoff, so the spike cannot tell a new RDP session from the old one." }
+    # Logoff took over two minutes on the first run, and a session that comes
+    # back is the autologon problem again. Require 15 quiet seconds in a row.
+    $quietSince = $null
+    $clearDeadline = (Get-Date).AddSeconds(240)
+    while ((Get-Date) -lt $clearDeadline) {
+        if ((Get-AccountSessions).Count -gt 0) { $quietSince = $null }
+        elseif (-not $quietSince) { $quietSince = Get-Date }
+        elseif (((Get-Date) - $quietSince).TotalSeconds -ge 15) { break }
+        Start-Sleep -Seconds 1
+    }
+    $stillThere = @(Get-AccountSessions)
+    if ($stillThere.Count -gt 0) {
+        throw "The account still has a session after logoff ($(@($stillThere | ForEach-Object { "$($_.id) $($_.station)" }) -join '; ')), so the spike cannot tell a new RDP session from an old one."
+    }
+    Step "no session for the account" $true
 
     # ─── 5. Start the client ───
     $rdpDir = Join-Path $env:SystemRoot ("Temp\marvin-spike-" + [guid]::NewGuid().ToString("N"))
@@ -392,10 +417,17 @@ try {
     }
 
     # ─── 6. Wait for the session ───
+    # Only an RDP session counts. A console session for the account means
+    # something else signed it in (autologon), which is recorded and ignored.
     $session = $null
     $deadline = (Get-Date).AddSeconds($SessionWaitSeconds)
     while ((Get-Date) -lt $deadline) {
-        $session = Get-AccountSessions | Where-Object { $_.state -eq $WTSActive } | Select-Object -First 1
+        $active = @(Get-AccountSessions | Where-Object { $_.state -eq $WTSActive })
+        $session = $active | Where-Object { $_.station -like "RDP-Tcp#*" } | Select-Object -First 1
+        foreach ($c in @($active | Where-Object { $_.station -notlike "RDP-Tcp#*" })) {
+            if (-not $facts.unexpectedSessions) { $facts.unexpectedSessions = @() }
+            if ($facts.unexpectedSessions -notcontains "$($c.id) $($c.station)") { $facts.unexpectedSessions += "$($c.id) $($c.station)" }
+        }
         if ($session) { break }
         if ($clientProc.HasExited) { break }
         Start-Sleep -Milliseconds 500
@@ -535,13 +567,24 @@ finally {
             Start-Sleep -Seconds 3
             if (-not $clientProc.HasExited) { $clientProc.Kill() }
         }
-        Start-Sleep -Seconds 3
+        # Logoff can take minutes on this VM. Wait for it rather than guess.
+        $goneDeadline = (Get-Date).AddSeconds(240)
+        while ((Get-Date) -lt $goneDeadline -and @(Get-AccountSessions).Count -gt 0) { Start-Sleep -Seconds 2 }
         $left = @(Get-AccountSessions)
         $verdict.sessionGoneAfterLogoff = ($left.Count -eq 0)
         Step "logged off" ($left.Count -eq 0) (@($left | ForEach-Object { "$($_.id) $($_.station) state=$($_.state)" }) -join "; ")
     } catch { Step "logoff" $false $_.Exception.Message }
 
-    # ─── 10. Put the rights back ───
+    # ─── 10. Put autologon and the rights back ───
+    # Restoring the flag does not sign the account in again until the next
+    # reboot, which is why the current build needs one after the spike.
+    if ($autologonPaused) {
+        try {
+            Set-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name AutoAdminLogon -Value "1"
+            Step "autologon restored" $true
+        } catch { Step "restore autologon" $false $_.Exception.Message }
+    }
+
     if (-not $KeepRdpRight) {
         try {
             if ($null -ne $originalDeny) { Set-DenyRdpValue -Value $originalDeny; Step "restored deny RDP logon right" $true }

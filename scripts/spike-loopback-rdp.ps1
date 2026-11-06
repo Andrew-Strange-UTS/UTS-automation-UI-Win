@@ -379,12 +379,14 @@ function Get-SpikeEvents {
     }
     # Other people's connections land in the same RDP logs. Keep only events
     # within 10 s of something our client logged.
+    # Lines that are not events (a log that could not be read) are kept as is.
     $out = @($out | Sort-Object)
-    $ours = @($out | Where-Object { $_ -match "^\S+ TerminalServices-RDPClient " } | ForEach-Object { [datetime]::ParseExact($_.Substring(0, 8), "HH:mm:ss", $null) })
+    $timeOf = { param($line) if ($line -match "^(\d\d:\d\d:\d\d) ") { [datetime]::ParseExact($Matches[1], "HH:mm:ss", [Globalization.CultureInfo]::InvariantCulture) } }
+    $ours = @($out | Where-Object { $_ -match "^\S+ TerminalServices-RDPClient " } | ForEach-Object { & $timeOf $_ })
     if ($ours.Count -eq 0) { return $out }
     return @($out | Where-Object {
-        $t = [datetime]::ParseExact($_.Substring(0, 8), "HH:mm:ss", $null)
-        @($ours | Where-Object { [math]::Abs(($t - $_).TotalSeconds) -le 10 }).Count -gt 0
+        $t = & $timeOf $_
+        (-not $t) -or (@($ours | Where-Object { [math]::Abs(($t - $_).TotalSeconds) -le 10 }).Count -gt 0)
     })
 }
 

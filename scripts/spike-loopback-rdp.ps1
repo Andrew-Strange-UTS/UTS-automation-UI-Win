@@ -246,6 +246,12 @@ public class SpikeWin {
     static string Text(IntPtr h) { var b = new StringBuilder(1024); GetWindowText(h, b, b.Capacity); return b.ToString(); }
     static string Cls(IntPtr h) { var b = new StringBuilder(256); GetClassName(h, b, b.Capacity); return b.ToString(); }
 
+    public static List<IntPtr> Handles(uint pid) {
+        var found = new List<IntPtr>();
+        EnumWindows((h, l) => { uint p; GetWindowThreadProcessId(h, out p); if (p == pid) found.Add(h); return true; }, IntPtr.Zero);
+        return found;
+    }
+
     public static List<string> Describe(uint pid) {
         var found = new List<string>();
         EnumWindows((h, l) => {
@@ -271,12 +277,84 @@ function Get-ClientWindows {
     return @()
 }
 
+# The client's error dialogs draw their message in a control that has no
+# window text, so read every element name through UI Automation instead.
+function Get-ClientDialogText {
+    param($Process)
+    $out = @()
+    try {
+        if (-not $Process -or $Process.HasExited) { return @() }
+        Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+        foreach ($h in [SpikeWin]::Handles([uint32]$Process.Id)) {
+            try {
+                $el = [System.Windows.Automation.AutomationElement]::FromHandle($h)
+                $names = @($el.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) |
+                    ForEach-Object { $_.Current.Name } | Where-Object { $_ -and $_.Trim() } | Select-Object -Unique)
+                if ($names.Count -gt 0) { $out += "'$($el.Current.Name)': " + (($names | ForEach-Object { $_ -replace "\s+", " " }) -join " | ") }
+            } catch {}
+        }
+    } catch { $out += "could not read dialog text: $($_.Exception.Message)" }
+    return $out
+}
+
+# Things on the account and the machine that can refuse an RDP logon after
+# the password has been accepted.
+function Get-AccountLogonFacts {
+    $f = [ordered]@{}
+    try {
+        $u = [ADSI]"WinNT://$env:COMPUTERNAME/$Account,user"
+        $flags = [int]$u.UserFlags.Value
+        $f.disabled = [bool]($flags -band 0x2)
+        $f.lockedOut = [bool]$u.IsAccountLocked.Value
+        $f.passwordExpired = [int]$u.PasswordExpired.Value
+        # The hidden "Deny this user permissions to log on to Remote Desktop
+        # Session Host" box on the account's Remote Desktop tab.
+        try { $f.rdsAllowLogon = $u.psbase.InvokeGet("AllowLogon") } catch { $f.rdsAllowLogon = "unreadable: $($_.Exception.InnerException.Message)" }
+    } catch { $f.error = $_.Exception.Message }
+    $f.inRemoteDesktopUsers = Test-AccountInRdpUsers
+    return $f
+}
+
+function Test-AccountInRdpUsers {
+    try {
+        $name = (New-Object Security.Principal.SecurityIdentifier("S-1-5-32-555")).Translate([Security.Principal.NTAccount]).Value.Split('\')[-1]
+        $g = [ADSI]"WinNT://$env:COMPUTERNAME/$name,group"
+        foreach ($m in @($g.psbase.Invoke("Members"))) {
+            $b = $m.GetType().InvokeMember("objectSid", "GetProperty", $null, $m, $null)
+            if ($b -and (New-Object Security.Principal.SecurityIdentifier($b, 0)).Value -eq $sid) { return $true }
+        }
+        return $false
+    } catch { return "unknown: $($_.Exception.Message)" }
+}
+
+# Credential providers and filters that are not Windows' own. An MFA or
+# privileged-access agent here can refuse a logon nobody can interact with.
+function Get-ThirdPartyLogonComponents {
+    $out = @()
+    foreach ($kind in "Credential Providers", "Credential Provider Filters") {
+        $root = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\$kind"
+        foreach ($k in @(Get-ChildItem $root -ErrorAction SilentlyContinue)) {
+            $clsid = $k.PSChildName
+            $name = (Get-ItemProperty $k.PSPath -ErrorAction SilentlyContinue).'(default)'
+            $dll = (Get-ItemProperty "Registry::HKEY_CLASSES_ROOT\CLSID\$clsid\InprocServer32" -ErrorAction SilentlyContinue).'(default)'
+            if ($dll -and ([Environment]::ExpandEnvironmentVariables($dll) -notmatch '\\Windows\\System32\\')) {
+                $out += "${kind}: $name $clsid -> $dll"
+            }
+        }
+    }
+    return $out
+}
+
 # RDP and logon events since the client started, so a failure says where it
 # stopped: never connected, connected but refused, or signed in and dropped.
 function Get-SpikeEvents {
     param([datetime]$Since)
     $logs = @(
-        @{ LogName = "Security"; Id = 4624, 4625, 4648 },
+        @{ LogName = "Security"; Id = 4624, 4625, 4648, 4776 },
+        @{ LogName = "System"; ProviderName = "TermService", "TermServLicensing", "Microsoft-Windows-TerminalServices-RemoteConnectionManager", "Microsoft-Windows-TerminalServices-LocalSessionManager" },
+        @{ LogName = "Microsoft-Windows-Winlogon/Operational" },
+        @{ LogName = "Microsoft-Windows-TerminalServices-RemoteConnectionManager/Admin" },
+        @{ LogName = "Microsoft-Windows-TerminalServices-LocalSessionManager/Admin" },
         @{ LogName = "Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational" },
         @{ LogName = "Microsoft-Windows-TerminalServices-LocalSessionManager/Operational" },
         @{ LogName = "Microsoft-Windows-RemoteDesktopServices-RdpCoreTS/Operational" },
@@ -288,9 +366,10 @@ function Get-SpikeEvents {
         try {
             foreach ($e in @(Get-WinEvent -FilterHashtable $f -MaxEvents 60 -ErrorAction Stop)) {
                 $msg = ($e.Message -replace "\s+", " ")
-                # Other people sign in to this VM all day. Keep only our account's
-                # logon events; the RDP logs are short enough to keep whole.
-                if ($filter.LogName -eq "Security" -and $msg -notmatch [regex]::Escape($Account)) { continue }
+                # Other people sign in to this VM all day. Keep our account's
+                # logon events, plus any failure from 127.0.0.x (a refused logon
+                # may not name the account).
+                if ($filter.LogName -eq "Security" -and $msg -notmatch [regex]::Escape($Account) -and -not ($e.Id -eq 4625 -and $msg -match "127\.0\.0\.")) { continue }
                 if ($msg.Length -gt 400) { $msg = $msg.Substring(0, 400) + "..." }
                 $out += "$($e.TimeCreated.ToString('HH:mm:ss')) $($filter.LogName.Split('/')[0].Replace('Microsoft-Windows-','')) $($e.Id): $msg"
             }
@@ -298,7 +377,15 @@ function Get-SpikeEvents {
             if ($_.Exception.Message -notmatch "No events were found") { $out += "$($filter.LogName): $($_.Exception.Message)" }
         }
     }
-    return @($out | Sort-Object)
+    # Other people's connections land in the same RDP logs. Keep only events
+    # within 10 s of something our client logged.
+    $out = @($out | Sort-Object)
+    $ours = @($out | Where-Object { $_ -match "^\S+ TerminalServices-RDPClient " } | ForEach-Object { [datetime]::ParseExact($_.Substring(0, 8), "HH:mm:ss", $null) })
+    if ($ours.Count -eq 0) { return $out }
+    return @($out | Where-Object {
+        $t = [datetime]::ParseExact($_.Substring(0, 8), "HH:mm:ss", $null)
+        @($ours | Where-Object { [math]::Abs(($t - $_).TotalSeconds) -le 10 }).Count -gt 0
+    })
 }
 
 
@@ -529,6 +616,8 @@ public class SpikeCred {
         if ($err -ne 0) { throw "CredWrite failed with Win32 error $err." }
         $credWritten = $true
         Step "credential stored for $credTarget" $true
+        $facts.accountBeforeConnect = Get-AccountLogonFacts
+        $facts.thirdPartyLogonComponents = @(Get-ThirdPartyLogonComponents)
 
         $clientProc = Start-Process -FilePath (Join-Path $env:SystemRoot "System32\mstsc.exe") -ArgumentList "/v:127.0.0.2 /w:1920 /h:1080" -PassThru
         Step "mstsc started" $true "pid $($clientProc.Id)"
@@ -572,6 +661,8 @@ public class SpikeCred {
 
     if (-not $session) {
         $facts.clientWindows = @(Get-ClientWindows $clientProc)
+        $facts.clientDialogText = @(Get-ClientDialogText $clientProc)
+        $facts.accountAfterFailure = Get-AccountLogonFacts
         $exit = if ($clientProc.HasExited) { "client exited with code $($clientProc.ExitCode)" } else { "client still running" }
         $seen = @(Get-AccountSessions | ForEach-Object { "$($_.id) $($_.station) state=$($_.state)" })
         throw "No active session for $Account within $SessionWaitSeconds s ($exit; account sessions seen: $($seen -join '; ')). Check Event Viewer > Microsoft-Windows-TerminalServices-RemoteConnectionManager and Security log 4625."
